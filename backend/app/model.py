@@ -1,20 +1,42 @@
 import psycopg2
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+# Load .env if present. If not, try .env.example in the repository root so
+# users who only have the example file still get reasonable defaults.
+loaded = load_dotenv()
+env_example = Path(__file__).resolve().parents[1] / '.env.example'
+if not loaded and env_example.exists():
+        load_dotenv(env_example)
+        print(f"Loaded environment variables from {env_example}")
+elif not loaded:
+        print("No .env file found. Copy '.env.example' to '.env' or set environment variables for the database.")
 
 def get_connection():
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("DB_HOST"),
-            port=os.getenv("DB_PORT"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD")
-        )
-        print("Connected successfully!")
-        return conn
+                db_host = os.getenv("DB_HOST")
+                db_port = os.getenv("DB_PORT")
+                db_name = os.getenv("DB_NAME")
+                db_user = os.getenv("DB_USER")
+                db_password = os.getenv("DB_PASSWORD")
+
+                if not all([db_host, db_port, db_name, db_user]):
+                        print("Missing one or more required DB environment variables (DB_HOST, DB_PORT, DB_NAME, DB_USER).")
+
+                if not db_password:
+                        print("DB_PASSWORD not set — psycopg2 will fail to authenticate without a password.\n"
+                                  "Make sure you have a .env file or set the DB_PASSWORD environment variable.")
+
+                conn = psycopg2.connect(
+                        host=db_host,
+                        port=db_port,
+                        database=db_name,
+                        user=db_user,
+                        password=db_password
+                )
+                print("Connected successfully!")
+                return conn
     except Exception as e:
         print(f"Connection failed: {e}")
         return None

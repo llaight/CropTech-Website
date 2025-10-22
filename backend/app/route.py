@@ -103,3 +103,49 @@ def login():
                         "email": email,
                         "role": role
                     }}), 200
+
+
+# -------------------------
+# List users 
+# -------------------------
+@bp.route("/users", methods=["GET"])
+def list_users():
+    """Return a list of registered users (omits password).
+
+    WARNING: This endpoint is intended for local development and debugging only.
+    Do NOT expose it in production without proper authentication and authorization.
+    """
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT user_id, name, email, role, created_at FROM users;")
+        rows = cursor.fetchall()
+        users = []
+        for row in rows:
+            user_id, name, email, role, created_at = row
+            # Convert created_at to ISO string if it's a datetime
+            try:
+                created_iso = created_at.isoformat()
+            except Exception:
+                created_iso = str(created_at)
+
+            users.append({
+                "id": user_id,
+                "name": name,
+                "email": email,
+                "role": role,
+                "created_at": created_iso,
+            })
+
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching users", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"users": users}), 200
