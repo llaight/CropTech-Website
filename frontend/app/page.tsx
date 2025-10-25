@@ -61,40 +61,86 @@ export default function Home() {
   }
 
   // Unauthenticated selection + forms
+  const heroBgStyle: React.CSSProperties = {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "2rem",
+    // layered backgrounds:
+    // 1) linear main gradient (diagonal)
+    // 2) radial overlay to create the soft darker band
+    background: `
+      linear-gradient(-45deg, #90C67C 15%, #328E6E 66%),
+      radial-gradient(40% 30% at 62% 40%, rgba(0,0,0,0.12), rgba(0,0,0,0) 45%)
+    `,
+    backgroundRepeat: "no-repeat",
+    backgroundSize: "cover",
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-8 bg-slate-50 dark:bg-slate-900">
-      <div className="w-full max-w-2xl text-center">
-        <header className="mb-8">
-          <Image src="/ctlogo.png" alt="CropTech" width={160} height={34} className="mx-auto" />
-          <h1 className="text-2xl font-semibold mt-4">CropTech</h1>
-        </header>
-
-        {!mode ? (
-          <div className="flex items-center justify-center gap-4">
-            <button
-              onClick={() => setMode("signup")}
-              className="px-6 py-3 bg-green-600 text-white rounded-md shadow hover:bg-green-700"
-            >
-              Sign up
-            </button>
-
-            <button
-              onClick={() => setMode("login")}
-              className="px-6 py-3 bg-blue-600 text-white rounded-md shadow hover:bg-blue-700"
-            >
-              Log in
-            </button>
-          </div>
-        ) : (
-          <div>
-            <button onClick={() => setMode(null)} className="text-sm underline mb-4">
-              ← Back
-            </button>
-            <div className="flex justify-center">
-              <AuthForm mode={mode} />
+    <div style={heroBgStyle}>
+      <div className="w-full max-w-md mx-auto">
+        {/* translucent card so gradient shows through slightly */}
+        <div
+          className="rounded-3xl py-12 px-8 md:px-12 text-center shadow-2xl"
+          style={{
+            background: "rgba(252, 251, 242, 0.92)", // slightly translucent off-white so the gradient shows through
+            backdropFilter: "saturate(120%) blur(6px)",
+          }}
+        >
+          {/* Logo + Title */}
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-28 h-28 flex items-center justify-center rounded-full bg-white/70 shadow-inner">
+              {/* temporary icon area - replace /public/ctlogo.png later */}
+              <Image src="/ctlogo.png" alt="CropTech" width={96} height={96} priority />
             </div>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight mt-4">
+              Crop<span className="text-[#67AE6E]">Tech</span>
+            </h1>
           </div>
-        )}
+
+          {/* Buttons */}
+          <div className="mt-10 flex flex-col items-center gap-6">
+            {!mode ? (
+              <>
+                <button
+                  onClick={() => setMode("login")}
+                  className="w-64 md:w-72 py-3 rounded-full font-bold text-white shadow-lg transform active:scale-95 transition"
+                  style={{
+                    background: "linear-gradient(90deg,#90C67C,#90C67C)",
+                    boxShadow: "0 10px 18px rgba(31,138,92,0.18)",
+                  }}
+                >
+                  Sign In
+                </button>
+
+                <button
+                  onClick={() => setMode("signup")}
+                  className="w-64 md:w-72 py-3 rounded-full font-bold text-white shadow-lg transform active:scale-95 transition"
+                  style={{
+                    background: "linear-gradient(90deg,#328E6E,#328E6E)",
+                    boxShadow: "0 10px 18px rgba(22,108,75,0.22)",
+                  }}
+                >
+                  Sign Up
+                </button>
+              </>
+            ) : (
+              <div className="w-full">
+                <button onClick={() => setMode(null)} className="text-sm underline mb-4 self-start">
+                  ← Back
+                </button>
+
+                <div className="mx-auto max-w-md">
+                  <AuthForm mode={mode} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <p className="text-sm text-gray-600 mt-8">By creating an account you agree to our Terms & Privacy Policy</p>
+        </div>
       </div>
     </div>
   );
