@@ -230,7 +230,17 @@ export default function Home() {
 
   // Unauthenticated Landing Page
   return (
-    <div className={`min-h-screen relative overflow-hidden ${theme === 'dark' ? 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900' : 'bg-gradient-to-br from-green-50 via-green-100 to-green-200'}`}>
+    <div 
+      className="min-h-screen relative overflow-hidden"
+      style={{
+    background: `
+      linear-gradient(-45deg, #90C67C 15%, #328E6E 66%),
+      radial-gradient(40% 30% at 62% 40%, rgba(0,0,0,0.12), rgba(0,0,0,0) 45%)
+    `,
+    backgroundRepeat: "no-repeat",
+    backgroundSize: "cover",
+      }}
+    >
       {/* Theme Toggle */}
       <div className="absolute top-4 right-4 z-20">
         <ThemeToggle />
@@ -238,29 +248,29 @@ export default function Home() {
 
       {/* Background Elements */}
       <div className="absolute inset-0 opacity-20">
-        <div className={`absolute inset-0 ${theme === 'dark' ? 'bg-white/5' : 'bg-green-500/10'}`} style={{
+        <div className="absolute inset-0 bg-white/5" style={{
           backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255,255,255,0.15) 1px, transparent 0)`,
           backgroundSize: '20px 20px'
         }}></div>
       </div>
       
       {/* Floating Elements */}
-      <div className={`absolute top-20 left-10 w-72 h-72 ${theme === 'dark' ? 'bg-green-500/10' : 'bg-green-400/20'} rounded-full blur-3xl animate-pulse`}></div>
-      <div className={`absolute bottom-20 right-10 w-96 h-96 ${theme === 'dark' ? 'bg-blue-500/10' : 'bg-green-300/20'} rounded-full blur-3xl animate-pulse delay-1000`}></div>
+      <div className="absolute top-20 left-10 w-72 h-72 bg-green-300/20 rounded-full blur-3xl animate-pulse"></div>
+      <div className="absolute bottom-20 right-10 w-96 h-96 bg-green-200/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
 
       <div className="relative z-10 min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full">
           {/* Premium Card */}
-          <div className={`${theme === 'dark' ? 'bg-white/10 border-white/20' : 'bg-white/80 border-green-200/50'} backdrop-blur-xl rounded-3xl p-8 md:p-12 shadow-2xl border`}>
+          <div className={`${theme === 'dark' ? 'bg-slate-800/90 border-slate-600/50' : 'bg-orange-50/90 border-green-300/50'} backdrop-blur-xl rounded-3xl p-8 md:p-12 shadow-2xl border`}>
             {/* Logo Section */}
             <div className="text-center mb-8">
               <div className={`inline-flex items-center justify-center w-20 h-20 ${theme === 'dark' ? 'bg-gradient-to-br from-green-400 to-green-600' : 'bg-gradient-to-br from-green-500 to-green-700'} rounded-2xl shadow-lg mb-4`}>
                 <Image src="/ctlogo.png" alt="CropTech" width={48} height={48} className="rounded-lg" />
             </div>
               <h1 className={`text-4xl md:text-5xl font-bold ${theme === 'dark' ? 'text-white' : 'text-green-900'} mb-2`}>
-                Crop<span className={`${theme === 'dark' ? 'bg-gradient-to-r from-green-400 to-green-300' : 'bg-gradient-to-r from-green-600 to-green-500'} bg-clip-text text-transparent`}>Tech</span>
+                Crop<span className={`${theme === 'dark' ? 'bg-gradient-to-r from-green-300 to-green-200' : 'bg-gradient-to-r from-green-600 to-green-500'} bg-clip-text text-transparent`}>Tech</span>
             </h1>
-              <p className={`${theme === 'dark' ? 'text-slate-300' : 'text-green-700'} text-lg`}>Advanced Agricultural Platform</p>
+              <p className={`${theme === 'dark' ? 'text-slate-200' : 'text-green-800'} text-lg`}>Advanced Agricultural Platform</p>
           </div>
 
             {/* Auth Section */}
@@ -269,13 +279,13 @@ export default function Home() {
                 <div className="space-y-4">
                 <button
                   onClick={() => setMode("login")}
-                    className={`w-full ${theme === 'dark' ? 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700' : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800'} text-white font-semibold py-4 px-6 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${theme === 'dark' ? 'focus:ring-offset-slate-900' : 'focus:ring-offset-green-100'}`}
+                    className={`w-full ${theme === 'dark' ? 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700' : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800'} text-white font-semibold py-4 px-6 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${theme === 'dark' ? 'focus:ring-offset-green-600' : 'focus:ring-offset-green-100'}`}
                 >
                   Sign In
                 </button>
                 <button
                   onClick={() => setMode("signup")}
-                    className={`w-full ${theme === 'dark' ? 'bg-white/10 hover:bg-white/20 text-white border-white/30 hover:border-white/50' : 'bg-green-100 hover:bg-green-200 text-green-800 border-green-300 hover:border-green-400'} font-semibold py-4 px-6 rounded-xl border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${theme === 'dark' ? 'focus:ring-white/50 focus:ring-offset-slate-900' : 'focus:ring-offset-green-100'}`}
+                    className={`w-full ${theme === 'dark' ? 'bg-white/10 hover:bg-white/20 text-white border-white/30 hover:border-white/50' : 'bg-green-100 hover:bg-green-200 text-green-800 border-green-300 hover:border-green-400'} font-semibold py-4 px-6 rounded-xl border transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${theme === 'dark' ? 'focus:ring-white/50 focus:ring-offset-green-600' : 'focus:ring-offset-green-100'}`}
                   >
                     Create Account
                 </button>
@@ -298,11 +308,11 @@ export default function Home() {
 
             {/* Footer */}
             <div className="mt-8 text-center">
-              <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-green-600'}`}>
+              <p className={`text-xs ${theme === 'dark' ? 'text-slate-200' : 'text-green-700'}`}>
                 By creating an account, you agree to our{" "}
-                <a href="#" className={`${theme === 'dark' ? 'text-green-400 hover:text-green-300' : 'text-green-700 hover:text-green-800'} transition-colors`}>Terms of Service</a>
+                <a href="#" className={`${theme === 'dark' ? 'text-green-300 hover:text-green-200' : 'text-green-800 hover:text-green-900'} transition-colors`}>Terms of Service</a>
                 {" "}and{" "}
-                <a href="#" className={`${theme === 'dark' ? 'text-green-400 hover:text-green-300' : 'text-green-700 hover:text-green-800'} transition-colors`}>Privacy Policy</a>
+                <a href="#" className={`${theme === 'dark' ? 'text-green-300 hover:text-green-200' : 'text-green-800 hover:text-green-900'} transition-colors`}>Privacy Policy</a>
               </p>
             </div>
           </div>
