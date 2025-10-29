@@ -67,6 +67,9 @@ export default function Home() {
                 <Link href="/analytics" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
                   Analytics
                 </Link>
+                <Link href="/land-tracker" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
+                  Land Tracker
+                </Link>
                 <Link href="/profile" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
                   Profile
                 </Link>
