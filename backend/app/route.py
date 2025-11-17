@@ -6,11 +6,70 @@ from .model import get_connection, create_tables
 import jwt
 from datetime import datetime, timedelta
 
+# Create blueprint and load JWT secret before defining routes
 bp = Blueprint("routes", __name__)
 JWT_SECRET = os.environ.get("JWT_SECRET")
 
-#create tables when the module is imported
+# create tables when the module is imported
 create_tables()
+
+
+# -------------------------
+# Change password
+# -------------------------
+@bp.route("/change-password", methods=["POST"])
+def change_password():
+    # Expect Authorization: Bearer <token>
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    data = request.get_json() or {}
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+
+    if not new_password:
+        return jsonify({"message": "New password is required"}), 400
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT password FROM users WHERE user_id=%s", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({"message": "User not found"}), 404
+
+        stored_hash = row[0]
+
+        # If user has a stored password, require current password match
+        if stored_hash:
+            if not current_password:
+                return jsonify({"message": "Current password is required"}), 400
+            if not check_password_hash(stored_hash, current_password):
+                return jsonify({"message": "Current password is incorrect"}), 401
+
+        new_hash = generate_password_hash(new_password)
+        cursor.execute("UPDATE users SET password=%s WHERE user_id=%s", (new_hash, user_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error updating password", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"message": "Password updated successfully"}), 200
 
 # -------------------------
 # Signup
@@ -149,3 +208,176 @@ def list_users():
     cursor.close()
     conn.close()
     return jsonify({"users": users}), 200
+
+
+# -------------------------
+# Fields endpoints
+# -------------------------
+@bp.route("/fields", methods=["POST"]) 
+def create_field():
+    data = request.get_json() or {}
+    location = data.get("location")
+
+    if not location:
+        return jsonify({"message": "Field location is required"}), 400
+
+    # Try to get user_id from token if provided
+    auth = request.headers.get("Authorization")
+    user_id = None
+    if auth and auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            user_id = payload.get("user_id")
+        except Exception:
+            # ignore token errors for now; proceed if user_id provided in body
+            user_id = None
+
+    if not user_id:
+        user_id = data.get("user_id")
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO fields (location, user_id) VALUES (%s, %s) RETURNING field_id;", (location, user_id))
+        row = cursor.fetchone()
+        conn.commit()
+        field_id = row[0] if row else None
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error creating field", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"field": {"id": field_id, "location": location, "user_id": user_id}}), 201
+
+
+@bp.route("/fields", methods=["GET"]) 
+def list_fields():
+    # Optional query params: user_id
+    q_user = request.args.get("user_id")
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        if q_user:
+            cursor.execute("SELECT field_id, location, user_id FROM fields WHERE user_id=%s;", (q_user,))
+        else:
+            cursor.execute("SELECT field_id, location, user_id FROM fields;")
+        rows = cursor.fetchall()
+        fields = []
+        for row in rows:
+            fid, location, uid = row
+            fields.append({"id": fid, "location": location, "user_id": uid})
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching fields", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"fields": fields}), 200
+
+
+# -------------------------
+# Crops endpoints
+# -------------------------
+@bp.route("/crops", methods=["POST"]) 
+def create_crop():
+    data = request.get_json() or {}
+    name = data.get("name")
+    health_status = data.get("health_status")
+    planting_date = data.get("planting_date")  # expect YYYY-MM-DD or None
+    field_id = data.get("field_id")
+
+    if not name:
+        return jsonify({"message": "Crop name is required"}), 400
+
+    # user association from token if provided
+    auth = request.headers.get("Authorization")
+    user_id = None
+    if auth and auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            user_id = payload.get("user_id")
+        except Exception:
+            user_id = None
+
+    if not user_id:
+        user_id = data.get("user_id")
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO crops (name, health_status, planting_date, user_id, field_id) VALUES (%s, %s, %s, %s, %s) RETURNING crop_id;",
+            (name, health_status, planting_date, user_id, field_id),
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        crop_id = row[0] if row else None
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error creating crop", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"crop": {"id": crop_id, "name": name, "health_status": health_status, "planting_date": planting_date, "user_id": user_id, "field_id": field_id}}), 201
+
+
+@bp.route("/crops", methods=["GET"]) 
+def list_crops():
+    q_user = request.args.get("user_id")
+    q_field = request.args.get("field_id")
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        if q_user and q_field:
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops WHERE user_id=%s AND field_id=%s;", (q_user, q_field))
+        elif q_user:
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops WHERE user_id=%s;", (q_user,))
+        elif q_field:
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops WHERE field_id=%s;", (q_field,))
+        else:
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops;")
+
+        rows = cursor.fetchall()
+        crops = []
+        for row in rows:
+            cid, name, health_status, planting_date, uid, fid = row
+            crops.append({
+                "id": cid,
+                "name": name,
+                "health_status": health_status,
+                "planting_date": planting_date.isoformat() if planting_date else None,
+                "user_id": uid,
+                "field_id": fid,
+            })
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching crops", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"crops": crops}), 200

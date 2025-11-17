@@ -66,8 +66,14 @@ def create_tables():
             CREATE TABLE IF NOT EXISTS weather(
                    weather_id SERIAL PRIMARY KEY,
                    date DATE NOT NULL,
+                   weather_code INT,
                    temperature FLOAT,
-                   rainfall FLOAT,
+                   relative_humidity FLOAT,
+                   precipitation_probability FLOAT,
+                   precipitation FLOAT,
+                   cloud_cover FLOAT,
+                   wind_speed_10m FLOAT,
+                   wind_direction_10m FLOAT,
                    location TEXT
                    )
             """)
