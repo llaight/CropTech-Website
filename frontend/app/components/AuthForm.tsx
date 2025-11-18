@@ -57,6 +57,11 @@ export default function AuthForm({ mode }: Props) {
           localStorage.setItem("token", token);
         }
         if (data.user) localStorage.setItem("user", JSON.stringify(data.user));
+
+        // Notify AppShell that auth state changed (same-tab)
+        window.dispatchEvent(new Event("auth:changed"));
+
+        // Navigate to the main page
         router.push("/");
       } else {
         router.push("/login");

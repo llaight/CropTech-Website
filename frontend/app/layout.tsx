@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "./components/ThemeProvider";
+import React from "react";
+import AppShell from "./components/AppShell";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -62,7 +64,10 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} antialiased`}>
         <ThemeProvider>
-          {children}
+          {/* Only show SideNav when authenticated */}
+          <AppShell>
+            {children}
+          </AppShell>
         </ThemeProvider>
       </body>
     </html>
