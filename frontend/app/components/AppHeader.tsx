@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type User = { name?: string; role?: string } | null;
@@ -23,47 +22,28 @@ export default function AppHeader() {
   const handleSignOut = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    window.dispatchEvent(new Event("auth:changed"));
     router.replace("/"); // go back to landing
   };
 
   return (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Image src="/ctlogo.png" alt="CropTech" width={24} height={24} className="rounded-lg" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">CropTech</h1>
-                <p className="text-xs text-slate-500">Agricultural Platform</p>
-              </div>
+      {/* Full-width container, no max-w centering */}
+      <div className="w-full px-2 sm:px-3 lg:px-4">
+        <div className="flex items-center h-16">
+          {/* Left: Brand */}
+          <div className="flex items-center gap-3 mr-auto">
+            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
+              <Image src="/ctlogo.png" alt="CropTech" width={24} height={24} className="rounded-lg" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">CropTech</h1>
+              <p className="text-xs text-slate-500">Agricultural Platform</p>
             </div>
           </div>
 
-          <nav className="hidden md:flex items-center space-x-8">
-            <Link href="/" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-              Dashboard
-            </Link>
-            <Link href="/inventory" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-              Inventory
-            </Link>
-            <Link href="/fields" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-              Fields
-            </Link>
-            <Link href="/analytics" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-              Analytics
-            </Link>
-            <Link href="/land-tracker" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-              Land Tracker
-            </Link>
-            <Link href="/profile" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-              Profile
-            </Link>
-          </nav>
-
-          <div className="flex items-center space-x-4">
+          {/* Right: User info + Sign out */}
+          <div className="flex items-center gap-4 ml-auto">
             <div className="text-right">
               <p className="text-sm font-medium text-slate-900">{user?.name || "User"}</p>
               <p className="text-xs text-slate-500 capitalize">{user?.role || "Farmer"}</p>

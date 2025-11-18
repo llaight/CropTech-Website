@@ -9,11 +9,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    try {
-      setAuthed(!!localStorage.getItem("token"));
-    } catch {
-      setAuthed(false);
-    }
+    const sync = () => setAuthed(!!localStorage.getItem("token"));
+    // initial check
+    sync();
+    // storage doesn't fire in same tab, but keep for cross-tab updates
+    window.addEventListener("storage", sync);
+    // custom event for same-tab updates
+    window.addEventListener("auth:changed", sync);
+    return () => {
+      window.removeEventListener("storage", sync);
+      window.removeEventListener("auth:changed", sync);
+    };
   }, []);
 
   return authed ? (
