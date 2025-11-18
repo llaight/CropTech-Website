@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import PlantingCalendar from '../../../components/PlantingCalendar';
 
 // Server component that shows field + crop + weather details.
 // It will try to fetch the field record from the backend by id
@@ -87,6 +88,13 @@ export default async function FieldDetailPage({ params }: { params: { id: string
             </ul>
           </div>
         </div>
+
+        {/* Planting / Harvest calendar (client component) */}
+        <PlantingCalendar
+          fieldId={field.id}
+          initialPlantingDate={crop.planting_date}
+          initialHarvestDate={crop.expected_harvest_date}
+        />
 
         <div className="mt-6 bg-white/80 p-6 rounded-xl shadow">
           <h3 className="font-semibold mb-2">Field Summary</h3>
