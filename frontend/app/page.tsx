@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import AuthForm from "./components/AuthForm";
@@ -38,61 +37,8 @@ export default function Home() {
   if (auth) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
-        {/* Premium Header */}
-        <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
-                    <Image src="/ctlogo.png" alt="CropTech" width={24} height={24} className="rounded-lg" />
-                  </div>
-                  <div>
-                    <h1 className="text-xl font-bold text-slate-900">CropTech</h1>
-                    <p className="text-xs text-slate-500">Agricultural Platform</p>
-                  </div>
-                </div>
-          </div>
-
-              <nav className="hidden md:flex items-center space-x-8">
-                <Link href="/" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-                  Dashboard
-                </Link>
-                <Link href="/inventory" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-                  Inventory
-                </Link>
-                <Link href="/fields" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-                  Fields
-                </Link>
-                <Link href="/analytics" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-                  Analytics
-                </Link>
-                <Link href="/land-tracker" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-                  Land Tracker
-                </Link>
-                <Link href="/profile" className="text-slate-600 hover:text-green-600 font-medium transition-colors">
-                  Profile
-                </Link>
-          </nav>
-
-              <div className="flex items-center space-x-4">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-slate-900">{user?.name || "User"}</p>
-                  <p className="text-xs text-slate-500 capitalize">{user?.role || "Farmer"}</p>
-                </div>
-                <button 
-                  onClick={handleSignOut}
-                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200"
-                >
-                  Sign out
-                </button>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Dashboard Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Dashboard Content */}
           <div className="mb-8">
             <h2 className="text-3xl font-bold text-slate-900 mb-2">
               Welcome back{user?.name ? `, ${user.name}` : ""}! 👋
@@ -189,8 +135,8 @@ export default function Home() {
                 <Link href="/analytics" className="flex items-center p-3 rounded-lg hover:bg-slate-50 transition-colors">
                   <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
                     <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2m0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
                   </div>
                   <div>
                     <p className="font-medium text-slate-900">View Analytics</p>
