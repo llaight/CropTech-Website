@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useRouter } from 'next/navigation';
 import dynamic from "next/dynamic";
 
 const LeafletMap = dynamic(() => import("./components/LeafletMap"), {
@@ -28,6 +29,90 @@ export default function LandTrackerPage() {
   const [selectedCrop, setSelectedCrop] = useState<string>("");
   const [fields, setFields] = useState<FieldData[]>([]);
   const mapInstanceRef = useRef<any>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userId, setUserId] = useState<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setUserName(parsed.name || null);
+        setUserId(parsed.id || parsed.user_id || null);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+  const router = useRouter();
+
+  // Load saved fields (and crops) from backend for this user
+  useEffect(() => {
+    if (!userId && !localStorage.getItem('token')) return;
+
+    (async () => {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const headers: any = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        // Fetch fields for user (if userId present, filter by it)
+        let fieldsUrl = 'http://localhost:5001/api/fields';
+        if (userId) fieldsUrl += `?user_id=${userId}`;
+        const fRes = await fetch(fieldsUrl, { headers });
+        if (!fRes.ok) {
+          console.warn('Failed to load fields', await fRes.text());
+          return;
+        }
+        const fData = await fRes.json().catch(() => ({}));
+        const fetchedFields = (fData.fields || []).map((f: any) => {
+          let center: [number, number] = [0, 0];
+          try {
+            if (f.location && typeof f.location === 'string' && f.location.includes(',')) {
+              const [latS, lngS] = f.location.split(',');
+              const lat = parseFloat(latS);
+              const lng = parseFloat(lngS);
+              if (!Number.isNaN(lat) && !Number.isNaN(lng)) center = [lat, lng];
+            }
+          } catch (e) {}
+
+          return {
+            id: f.id,
+            name: f.name || `Field ${f.id}`,
+            crop: '',
+            coordinates: [],
+            center,
+          } as FieldData;
+        });
+
+        // Fetch crops for this user and map to fields by field_id
+        let cropsUrl = 'http://localhost:5001/api/crops';
+        if (userId) cropsUrl += `?user_id=${userId}`;
+        const cRes = await fetch(cropsUrl, { headers });
+        if (cRes.ok) {
+          const cData = await cRes.json().catch(() => ({}));
+          const crops = cData.crops || [];
+          const cropByField: Record<string, string> = {};
+          for (const c of crops) {
+            if (c.field_id) {
+              // store first crop name per field
+              if (!cropByField[c.field_id]) cropByField[c.field_id] = c.name || '';
+            }
+          }
+
+          // attach crop names
+          for (const ff of fetchedFields) {
+            if (cropByField[ff.id]) ff.crop = cropByField[ff.id];
+          }
+        }
+
+        // update UI
+        if (fetchedFields.length > 0) setFields(fetchedFields as FieldData[]);
+      } catch (err) {
+        console.warn('Error loading saved fields:', err);
+      }
+    })();
+  }, [userId]);
 
   const handleAddressSearch = async () => {
     if (!address.trim()) return;
@@ -59,6 +144,7 @@ export default function LandTrackerPage() {
 
   return (
     <div className="min-h-screen bg-brand-hero">
+
       {/* Map and Fields Side by Side */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-0">
         <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
@@ -179,22 +265,69 @@ export default function LandTrackerPage() {
                             const centerLat = polygonPoints.reduce((sum, p) => sum + p[0], 0) / polygonPoints.length;
                             const centerLng = polygonPoints.reduce((sum, p) => sum + p[1], 0) / polygonPoints.length;
                             
-                            // Create new field
-                            const newField: FieldData = {
-                              id: Date.now(),
-                              name: `${selectedCrop} Field ${fields.length + 1}`,
-                              crop: selectedCrop,
-                              coordinates: polygonPoints,
-                              center: [centerLat, centerLng],
-                            };
-                            
-                            // Add to fields list
-                            setFields([...fields, newField]);
-                            
-                            // Reset drawing mode
-                            setIsDrawingMode(false);
-                            setPolygonPoints([]);
-                            setSelectedCrop("");
+                                // Create new field (client-side object)
+                                const newField: FieldData = {
+                                  id: Date.now(),
+                                  name: `${selectedCrop} Field ${fields.length + 1}`,
+                                  crop: selectedCrop,
+                                  coordinates: polygonPoints,
+                                  center: [centerLat, centerLng],
+                                };
+
+                                // Try to persist field + crop to backend
+                                (async () => {
+                                  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+                                  const storedUserRaw = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+                                  const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
+                                  const bodyField: any = { location: `${centerLat},${centerLng}` };
+                                  if (!token && storedUser && (storedUser.id || storedUser.user_id)) bodyField.user_id = storedUser.id || storedUser.user_id;
+
+                                  try {
+                                    const headers: any = { 'Content-Type': 'application/json' };
+                                    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                                    const fRes = await fetch('http://localhost:5001/api/fields', {
+                                      method: 'POST',
+                                      headers,
+                                      body: JSON.stringify(bodyField),
+                                    });
+                                    if (fRes.ok) {
+                                      const fData = await fRes.json().catch(() => ({}));
+                                      const createdField = fData.field;
+                                      if (createdField && createdField.id) {
+                                        // create crop linked to field
+                                        const cropBody: any = {
+                                          name: selectedCrop,
+                                          field_id: createdField.id,
+                                          planting_date: new Date().toISOString().slice(0,10),
+                                        };
+                                        if (!token && storedUser && (storedUser.id || storedUser.user_id)) cropBody.user_id = storedUser.id || storedUser.user_id;
+
+                                        const cRes = await fetch('http://localhost:5001/api/crops', {
+                                          method: 'POST',
+                                          headers,
+                                          body: JSON.stringify(cropBody),
+                                        });
+                                        if (!cRes.ok) {
+                                          console.warn('Crop creation failed', await cRes.text());
+                                        }
+                                        // Attach created field id to local object
+                                        newField.id = createdField.id;
+                                      }
+                                    } else {
+                                      console.warn('Field creation failed', await fRes.text());
+                                    }
+                                  } catch (err) {
+                                    console.warn('Network error saving field/crop', err);
+                                  }
+
+                                  // Add to fields list locally regardless of backend result
+                                  setFields((prev) => [...prev, newField]);
+                                  // Reset drawing mode
+                                  setIsDrawingMode(false);
+                                  setPolygonPoints([]);
+                                  setSelectedCrop("");
+                                })();
                           }}
                           className="px-6 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white font-medium rounded-xl shadow-md hover:from-green-700 hover:to-green-800 transition-all transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 flex items-center gap-2"
                         >
@@ -264,11 +397,7 @@ export default function LandTrackerPage() {
                     <div 
                       key={field.id} 
                       className="p-4 bg-white/60 rounded-lg border border-green-300/50 shadow-sm cursor-pointer hover:bg-white/80 hover:border-green-400 transition-all"
-                      onClick={() => {
-                        if (mapInstanceRef.current && (mapInstanceRef.current as any).navigateToField) {
-                          (mapInstanceRef.current as any).navigateToField(field.coordinates);
-                        }
-                      }}
+                      onClick={() => router.push(`/fields/field/${field.id}`)}
                     >
                       <h3 className="font-semibold text-green-800">{field.name}</h3>
                       <p className="text-sm text-slate-600">Crops: {field.crop}</p>
