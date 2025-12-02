@@ -1,6 +1,6 @@
 import React from 'react';
-import Link from 'next/link';
 import PlantingCalendar from '../components/PlantingCalendar';
+import BackButton from "../../../components/BackButton";
 
 // Server component that shows field + crop + weather details.
 // It will try to fetch the field record from the backend by id
@@ -61,7 +61,8 @@ export default async function FieldDetailPage({ params }: { params: { id: string
             <p className="text-sm text-white/90">Field ID: {field.id} • Location: {field.location}</p>
           </div>
           <div>
-            <Link href="/fields" className="px-3 py-2 text-sm font-medium text-white hover:text-green-300">← Back to Fields</Link>
+            {/* Reusable back icon */}
+            <BackButton href="/fields" className="hover:opacity-90" />
           </div>
         </div>
 
