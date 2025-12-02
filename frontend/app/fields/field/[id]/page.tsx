@@ -77,7 +77,7 @@ export default async function FieldDetailPage({ params }: { params: { id: string
         }
       }
   } catch (err) {
-    // network/backend unavailable — keep demo values
+    // network/backend unavailable
   }
 
   // Attempt to reverse-geocode the location into a city name by calling the backend
