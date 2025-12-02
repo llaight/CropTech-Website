@@ -1,6 +1,6 @@
 import React from 'react';
-import Link from 'next/link';
 import PlantingCalendar from '../components/PlantingCalendar';
+import BackButton from "../../../components/BackButton";
 
 // Map Open-Meteo weather codes to human-readable descriptions
 const WEATHER_CODE_MAP: Record<number, string> = {
@@ -219,7 +219,8 @@ export default async function FieldDetailPage({ params }: { params: { id: string
             ) : null}
           </div>
           <div>
-            <Link href="/fields" className="px-3 py-2 text-sm font-medium text-white hover:text-green-300">← Back to Fields</Link>
+            {/* Reusable back icon */}
+            <BackButton href="/fields" className="hover:opacity-90" />
           </div>
         </div>
 
