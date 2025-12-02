@@ -61,7 +61,16 @@ def create_tables():
                    )
             """)
     
-    #weather data table
+    # field table 
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fields(
+                   field_id SERIAL PRIMARY KEY,
+                   location TEXT NOT NULL,
+                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE
+                  )
+            """)
+
+    #weather data table (created after fields so FK can reference fields)
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS weather(
                    weather_id SERIAL PRIMARY KEY,
@@ -74,18 +83,24 @@ def create_tables():
                    cloud_cover FLOAT,
                    wind_speed_10m FLOAT,
                    wind_direction_10m FLOAT,
+                   field_id INTEGER REFERENCES fields(field_id) ON DELETE CASCADE,
                    location TEXT
                    )
             """)
-    
-    # field table 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS fields(
-                   field_id SERIAL PRIMARY KEY,
-                   location TEXT NOT NULL,
-                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE
-                  )
-            """)
+    # Ensure columns exist for existing tables (handle upgrades/migrations)
+    # ALTER TABLE ADD COLUMN IF NOT EXISTS is supported in modern Postgres
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS weather_code INT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS temperature FLOAT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS relative_humidity FLOAT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS precipitation_probability FLOAT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS precipitation FLOAT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS cloud_cover FLOAT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS wind_speed_10m FLOAT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS wind_direction_10m FLOAT;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS field_id INTEGER;")
+    cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS location TEXT;")
+    # Ensure foreign key constraint for field_id exists if possible (skip if already present)
+    # Note: adding FK constraints via ALTER while avoiding duplicates is more involved; keep simple for now
     
     # inventory table
     cursor.execute("""

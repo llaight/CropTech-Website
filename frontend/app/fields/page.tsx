@@ -18,6 +18,8 @@ interface FieldData {
   crop: string;
   coordinates: [number, number][];
   center: [number, number];
+  city?: string | null;
+  state?: string | null;
 }
 
 export default function LandTrackerPage() {
@@ -103,6 +105,27 @@ export default function LandTrackerPage() {
           // attach crop names
           for (const ff of fetchedFields) {
             if (cropByField[ff.id]) ff.crop = cropByField[ff.id];
+          }
+        }
+
+        // Reverse-geocode each field's center to obtain city and state.
+        // Do this sequentially to avoid hammering the Nominatim service.
+        for (let i = 0; i < fetchedFields.length; i++) {
+          const ff = fetchedFields[i];
+          try {
+            const [lat, lon] = ff.center;
+            if (lat !== 0 || lon !== 0) {
+              const r = await fetch(`http://localhost:5001/api/reverse-geocode?lat=${lat}&lon=${lon}`);
+              if (r.ok) {
+                const j = await r.json().catch(() => ({}));
+                ff.city = j.city || null;
+                ff.state = j.state || null;
+              }
+            }
+          } catch (e) {
+            // ignore per-field reverse geocode errors
+            ff.city = null;
+            ff.state = null;
           }
         }
 
@@ -404,6 +427,11 @@ export default function LandTrackerPage() {
                       <p className="text-xs text-slate-500">
                         Coordinates: {field.center[0].toFixed(4)}°N, {field.center[1].toFixed(4)}°E
                       </p>
+                      {(field.city || field.state) && (
+                        <p className="text-xs text-slate-500">
+                          {field.city || ''}{field.city && field.state ? ', ' : ''}{field.state || ''}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

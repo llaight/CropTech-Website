@@ -5,6 +5,11 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from .model import get_connection, create_tables
 import jwt
 from datetime import datetime, timedelta
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+import requests
+from dateutil import parser as date_parser
+from math import fabs
 
 # Create blueprint and load JWT secret before defining routes
 bp = Blueprint("routes", __name__)
@@ -12,6 +17,9 @@ JWT_SECRET = os.environ.get("JWT_SECRET")
 
 # create tables when the module is imported
 create_tables()
+
+# geocoder instance used for reverse geocoding
+_geolocator = Nominatim(user_agent="croptech-reverse-geocoder")
 
 
 # -------------------------
@@ -381,3 +389,203 @@ def list_crops():
     cursor.close()
     conn.close()
     return jsonify({"crops": crops}), 200
+
+
+# -------------------------
+# Reverse geocoding endpoint
+# -------------------------
+@bp.route("/reverse-geocode", methods=["GET"])
+def reverse_geocode():
+    """Reverse-geocode a latitude/longitude pair and return a city-like name.
+
+    Query params: lat, lon
+    Returns JSON: { city: <string|null>, display_name: <string|null> }
+    """
+    lat = request.args.get("lat")
+    lon = request.args.get("lon")
+    if not lat or not lon:
+        return jsonify({"message": "lat and lon query parameters are required"}), 400
+
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except ValueError:
+        return jsonify({"message": "Invalid lat/lon values"}), 400
+
+    try:
+        # Use a longer timeout to avoid quick failures (Nominatim default is short)
+        loc = _geolocator.reverse((lat_f, lon_f), exactly_one=True, language='en', timeout=10)
+        if not loc:
+            return jsonify({"city": None, "state": None, "display_name": None}), 200
+
+        raw = getattr(loc, 'raw', {}) or {}
+        address = raw.get('address', {}) if isinstance(raw, dict) else {}
+        city = (address.get('city') or address.get('town') or address.get('village') or
+            address.get('hamlet') or address.get('county') or None)
+        # Prefer 'state' but fall back to other region-like fields
+        state = address.get('state') or address.get('region') or None
+        return jsonify({"city": city, "state": state, "display_name": loc.address}), 200
+    except (GeocoderTimedOut, GeocoderServiceError) as e:
+        # Don't fail the client - return nulls so UI can render without breaking
+        return jsonify({"city": None, "state": None, "display_name": None, "warning": "geocoding_failed", "error": str(e)}), 200
+    except Exception as e:
+        # For any other unexpected errors, still return nulls rather than a 500
+        return jsonify({"city": None, "state": None, "display_name": None, "warning": "geocoding_error", "error": str(e)}), 200
+
+
+# -------------------------
+# Fetch weather from Open-Meteo and store
+# -------------------------
+@bp.route("/fetch-weather", methods=["POST"])
+def fetch_weather_for_location():
+    """Fetch current hourly weather from Open-Meteo for lat/lon and store one row in the weather table.
+
+    Accepts JSON body or query params with `lat` and `lon`.
+    Returns the inserted weather row on success.
+    """
+    data = request.get_json(silent=True) or {}
+    lat = data.get('lat') or request.args.get('lat')
+    lon = data.get('lon') or request.args.get('lon')
+
+    if lat is None or lon is None:
+        return jsonify({"message": "lat and lon are required (query params or JSON body)"}), 400
+
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except ValueError:
+        return jsonify({"message": "Invalid lat/lon values"}), 400
+
+    # Optional field_id to link this weather row to a field (from JSON body or query)
+    field_id = None
+    try:
+        field_id_raw = data.get('field_id') or request.args.get('field_id')
+        if field_id_raw is not None:
+            field_id = int(field_id_raw)
+    except Exception:
+        field_id = None
+
+    # Build Open-Meteo hourly request for today
+    # Request the set of hourly variables we need
+    params = {
+        'latitude': lat_f,
+        'longitude': lon_f,
+        'hourly': ','.join([
+            'temperature_2m',
+            'relativehumidity_2m',
+            'precipitation_probability',
+            'precipitation',
+            'cloudcover',
+            'windspeed_10m',
+            'winddirection_10m',
+            'weathercode',
+        ]),
+        'timezone': 'UTC',
+        'start_date': datetime.utcnow().date().isoformat(),
+        'end_date': datetime.utcnow().date().isoformat(),
+    }
+
+    try:
+        res = requests.get('https://api.open-meteo.com/v1/forecast', params=params, timeout=10)
+        if res.status_code != 200:
+            return jsonify({"message": "Open-Meteo request failed", "status_code": res.status_code, "body": res.text}), 502
+        payload = res.json()
+    except Exception as e:
+        return jsonify({"message": "Error contacting Open-Meteo", "error": str(e)}), 502
+
+    hours = payload.get('hourly', {})
+    times = hours.get('time', [])
+
+    if not times:
+        return jsonify({"message": "No hourly data returned by Open-Meteo"}), 502
+
+    # Choose the hour nearest to now (UTC)
+    now = datetime.utcnow()
+    best_idx = 0
+    best_diff = None
+    for i, t in enumerate(times):
+        try:
+            dt = date_parser.isoparse(t)
+            diff = fabs((dt - now).total_seconds())
+            if best_diff is None or diff < best_diff:
+                best_diff = diff
+                best_idx = i
+        except Exception:
+            continue
+
+    def get_hourly(name):
+        arr = hours.get(name, [])
+        try:
+            return arr[best_idx]
+        except Exception:
+            return None
+
+    weather_code = get_hourly('weathercode')
+    temperature = get_hourly('temperature_2m')
+    relative_humidity = get_hourly('relativehumidity_2m')
+    precipitation_probability = get_hourly('precipitation_probability')
+    precipitation = get_hourly('precipitation')
+    cloud_cover = get_hourly('cloudcover')
+    wind_speed_10m = get_hourly('windspeed_10m')
+    wind_direction_10m = get_hourly('winddirection_10m')
+
+    # Insert into DB (date = date part of the selected hour)
+    date_str = None
+    try:
+        date_str = times[best_idx].split('T')[0]
+    except Exception:
+        date_str = datetime.utcnow().date().isoformat()
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO weather (date, weather_code, temperature, relative_humidity, precipitation_probability, precipitation, cloud_cover, wind_speed_10m, wind_direction_10m, field_id, location)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING weather_id;
+            """,
+            (
+                date_str,
+                int(weather_code) if weather_code is not None else None,
+                float(temperature) if temperature is not None else None,
+                float(relative_humidity) if relative_humidity is not None else None,
+                float(precipitation_probability) if precipitation_probability is not None else None,
+                float(precipitation) if precipitation is not None else None,
+                float(cloud_cover) if cloud_cover is not None else None,
+                float(wind_speed_10m) if wind_speed_10m is not None else None,
+                float(wind_direction_10m) if wind_direction_10m is not None else None,
+                field_id,
+                f"{lat_f},{lon_f}",
+            )
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        weather_id = row[0] if row else None
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error inserting weather into DB", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+
+    return jsonify({
+        "weather": {
+            "id": weather_id,
+            "date": date_str,
+            "weather_code": weather_code,
+            "temperature": temperature,
+            "relative_humidity": relative_humidity,
+            "precipitation_probability": precipitation_probability,
+            "precipitation": precipitation,
+            "cloud_cover": cloud_cover,
+            "wind_speed_10m": wind_speed_10m,
+            "wind_direction_10m": wind_direction_10m,
+            "field_id": field_id,
+            "location": f"{lat_f},{lon_f}",
+        }
+    }), 201
