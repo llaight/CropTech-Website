@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import BackButton from "@/app/components/BackButton"; // added import
 
 type User = { id?: number; name?: string; email?: string; role?: string } | null;
 type Settings = { units: "metric" | "imperial"; language: "en" | "fil" };
@@ -163,16 +164,15 @@ export default function ProfilePage() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">Profile</h1>
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Profile</h1>
             <p className="mt-2 text-sm text-slate-600">Manage your account, settings and support options.</p>
           </div>
           <div>
-            <a
-              href="/"
-              className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-green-600 transition-colors rounded-md"
-            >
-              ← Back to Dashboard
-            </a>
+            {/* Back icon: matches Profile heading color in light mode */}
+            <BackButton
+              className="hover:opacity-90"
+              iconClassName="text-slate-900 dark:text-white"
+            />
           </div>
         </div>
 
