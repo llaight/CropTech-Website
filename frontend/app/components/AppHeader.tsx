@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import ThemeToggle from "./ThemeToogle";
 
 type User = { name?: string; role?: string } | null;
 
@@ -28,7 +29,6 @@ export default function AppHeader() {
 
   return (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm">
-      {/* Full-width container, no max-w centering */}
       <div className="w-full px-2 sm:px-3 lg:px-4">
         <div className="flex items-center h-16">
           {/* Left: Brand */}
@@ -42,8 +42,11 @@ export default function AppHeader() {
             </div>
           </div>
 
-          {/* Right: User info + Sign out */}
+          {/* Right: User info + Theme + Sign out */}
           <div className="flex items-center gap-4 ml-auto">
+            {/* Theme toggle */}
+            <ThemeToggle />
+
             <div className="text-right">
               <p className="text-sm font-medium text-slate-900">{user?.name || "User"}</p>
               <p className="text-xs text-slate-500 capitalize">{user?.role || "Farmer"}</p>

@@ -8,6 +8,7 @@ type Props = {
   size?: number;
   className?: string;
   label?: string;
+  iconClassName?: string; // added
 };
 
 export default function BackButton({
@@ -16,6 +17,7 @@ export default function BackButton({
   size = 36,
   className = "",
   label = "Back",
+  iconClassName = "text-white", // default
 }: Props) {
   const router = useRouter();
   const handleClick = () => {
@@ -33,7 +35,7 @@ export default function BackButton({
         icon={icon}
         width={size}
         height={size}
-        className="text-white drop-shadow-sm transition-transform group-hover:scale-105 group-active:scale-95"
+        className={`${iconClassName} drop-shadow-sm transition-transform group-hover:scale-105 group-active:scale-95`}
       />
     </button>
   );
