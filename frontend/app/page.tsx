@@ -9,21 +9,52 @@ import AuthCard from "./components/AuthCard";
 
 export default function Home() {
   const [mode, setMode] = useState<null | "login" | "signup">(null);
-  const [auth, setAuth] = useState(false);
+
+  // Initialize from localStorage to prevent initial unauth render flicker
+  const [auth, setAuth] = useState<boolean>(() => {
+    try {
+      return !!localStorage.getItem("token");
+    } catch {
+      return false;
+    }
+  });
+
+  const [ready, setReady] = useState(false);
   const [user, setUser] = useState<{ name?: string; role?: string } | null>(null);
   const { theme } = useTheme();
 
   useEffect(() => {
+    // First mount sync
     try {
       const token = localStorage.getItem("token");
       const u = localStorage.getItem("user");
-      if (token) {
-        setAuth(true);
-        if (u) setUser(JSON.parse(u));
-      }
-    } catch (e) {
-      // ignore JSON parse errors
+      setAuth(!!token);
+      if (u) setUser(JSON.parse(u));
+    } catch {
+      // ignore
+    } finally {
+      setReady(true);
     }
+
+    // Listen for auth changes (same-tab)
+    const sync = () => {
+      try {
+        const token = localStorage.getItem("token");
+        const u = localStorage.getItem("user");
+        setAuth(!!token);
+        if (u) setUser(JSON.parse(u));
+        else setUser(null);
+      } catch {
+        setAuth(false);
+        setUser(null);
+      }
+    };
+    window.addEventListener("auth:changed", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("auth:changed", sync);
+      window.removeEventListener("storage", sync);
+    };
   }, []);
 
   const handleSignOut = () => {
@@ -31,7 +62,11 @@ export default function Home() {
     localStorage.removeItem("user");
     setAuth(false);
     setMode(null);
+    window.dispatchEvent(new Event("auth:changed"));
   };
+
+  // Avoid flicker: render nothing until initial auth check is done
+  if (!ready) return null;
 
   // Authenticated Dashboard
   if (auth) {
