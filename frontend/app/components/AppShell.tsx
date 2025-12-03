@@ -3,9 +3,12 @@
 import React, { useEffect, useState } from "react";
 import SideNav from "./Side-nav";
 import AppHeader from "./AppHeader";
+import { usePathname } from "next/navigation";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [authed, setAuthed] = useState(false);
+  const pathname = usePathname();
+  const noScroll = pathname?.startsWith("/profile");
 
   useEffect(() => {
     const sync = () => setAuthed(!!localStorage.getItem("token"));
@@ -25,7 +28,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <AppHeader />
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <SideNav />
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className={`flex-1 min-h-0 ${noScroll ? "" : "overflow-y-auto"}`}>
           <div className="min-h-full">{children}</div>
         </div>
       </div>
