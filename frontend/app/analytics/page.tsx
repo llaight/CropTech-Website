@@ -137,32 +137,21 @@ export default function AnalyticsPage() {
     iconColor: string;
   }) => (
     <div
-      className={`${
-        isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
-      } rounded-2xl shadow-lg border p-6 hover:shadow-xl transition-all duration-300`}
+      className={`${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"} rounded-2xl shadow-lg border p-6 hover:shadow-xl transition-all duration-300`}
     >
       <div className="flex items-center justify-between mb-4">
         <div className={`w-12 h-12 ${iconColor} rounded-xl flex items-center justify-center`}>
-          <Icon className={`w-6 h-6 ${isDark ? "text-white" : "text-slate-700"}`} />
+          {/* Fixed icon color regardless of theme */}
+          <Icon className="w-6 h-6 text-slate-700" />
         </div>
         {change !== undefined && (
-          <div
-            className={`flex items-center text-sm font-medium ${
-              change >= 0 ? "text-green-600" : "text-red-600"
-            }`}
-          >
-            {change >= 0 ? (
-              <TrendingUp className="w-4 h-4 mr-1" />
-            ) : (
-              <TrendingDown className="w-4 h-4 mr-1" />
-            )}
+          <div className={`flex items-center text-sm font-medium ${change >= 0 ? "text-green-600" : "text-red-600"}`}>
+            {change >= 0 ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
             {Math.abs(change)}%
           </div>
         )}
       </div>
-      <h3 className={`text-sm font-medium ${isDark ? "text-slate-400" : "text-slate-600"} mb-1`}>
-        {title}
-      </h3>
+      <h3 className={`text-sm font-medium ${isDark ? "text-slate-400" : "text-slate-600"} mb-1`}>{title}</h3>
       <p className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
         {typeof value === "number" && title.includes("Revenue")
           ? `₱${value.toLocaleString()}`
@@ -197,13 +186,14 @@ export default function AnalyticsPage() {
               <button
                 key={period}
                 onClick={() => setSelectedPeriod(period)}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  selectedPeriod === period
-                    ? "bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg"
+                className={`px-4 py-2 rounded-lg font-medium transition-all
+                  border
+                  ${selectedPeriod === period
+                    ? "bg-gradient-to-r from-green-500 to-green-600 text-white border-transparent shadow-lg"
                     : isDark
-                    ? "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                    : "bg-white text-slate-700 hover:bg-slate-50 border border-slate-200"
-                }`}
+                      ? "bg-slate-800 text-slate-300 hover:bg-slate-700 border-slate-700"
+                      : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200"
+                  }`}
               >
                 {period.charAt(0).toUpperCase() + period.slice(1)}
               </button>
@@ -217,28 +207,28 @@ export default function AnalyticsPage() {
               value={mockData.overview.totalRevenue}
               change={mockData.overview.revenueChange}
               icon={DollarSign}
-              iconColor="bg-green-100 dark:bg-green-900/30"
+              iconColor="bg-green-100"
             />
             <StatCard
               title="Total Yield"
               value={mockData.overview.totalYield}
               change={mockData.overview.yieldChange}
               icon={Package}
-              iconColor="bg-blue-100 dark:bg-blue-900/30"
+              iconColor="bg-blue-100"
             />
             <StatCard
               title="Profit Estimate"
               value={mockData.overview.profitEstimate}
               change={mockData.overview.profitChange}
               icon={TrendingUpIcon}
-              iconColor="bg-purple-100 dark:bg-purple-900/30"
+              iconColor="bg-purple-100"
             />
             <StatCard
               title="Avg Crop Health"
               value={`${mockData.overview.avgCropHealth}%`}
               change={mockData.overview.healthChange}
               icon={BarChart3}
-              iconColor="bg-yellow-100 dark:bg-yellow-900/30"
+              iconColor="bg-yellow-100"
             />
           </div>
 
@@ -725,7 +715,9 @@ export default function AnalyticsPage() {
                   {mockData.weatherData.forecast.map((day, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50"
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+                      }`}
                     >
                       <div className="flex items-center gap-3">
                         <span className="text-lg">{day.icon}</span>
