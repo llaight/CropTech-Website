@@ -1,9 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useState } from 'react';
-
 import Link from 'next/link';
-
 import {
   Tooltip,
   TooltipContent,
@@ -13,9 +11,12 @@ import {
 import { NavItems } from '@/app/config';
 import { cn } from '@/app/lib/utils';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useTheme } from './ThemeProvider';
 
 export default function SideNav() {
   const navItems = NavItems();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
 
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -25,15 +26,12 @@ export default function SideNav() {
       }
       return JSON.parse(saved);
     }
-    return true; // default state if window is not defined
+    return true;
   });
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(
-        'sidebarExpanded',
-        JSON.stringify(isSidebarExpanded),
-      );
+      window.localStorage.setItem('sidebarExpanded', JSON.stringify(isSidebarExpanded));
     }
   }, [isSidebarExpanded]);
 
@@ -43,39 +41,17 @@ export default function SideNav() {
 
   return (
     <div
-        className={cn(
-          isSidebarExpanded ? 'w-[200px]' : 'w-[68px]',
-          'border-r border-neutral-200 dark:border-neutral-800 transition-all duration-300 ease-in-out transform hidden sm:flex h-full',
-        )}
-      >
-        <aside className="flex h-full flex-col w-full break-words px-4 overflow-x-hidden columns-1">
-          {/* Top */}
-          <div className="mt-4 relative pb-2">
-            <div className="flex flex-col space-y-1">
-              {navItems.map((item, idx) => {
-                if (item.position === 'top') {
-                  return (
-                    <Fragment key={idx}>
-                      <div className="space-y-1">
-                        <SideNavItem
-                          label={item.name}
-                          icon={item.icon}
-                          path={item.href}
-                          active={item.active}
-                          isSidebarExpanded={isSidebarExpanded}
-                        />
-                      </div>
-                    </Fragment>
-                  );
-                }
-              })}
-            </div>
-          </div>
-          {/* Bottom */}
-          <div className="sticky bottom-0 mt-auto whitespace-nowrap mb-4 transition duration-200 block">
-            {/* <ThemeToggle isDropDown={true} /> */}
+      className={cn(
+        isSidebarExpanded ? 'w-[200px]' : 'w-[68px]',
+        `border-r ${isDark ? 'border-neutral-800 bg-slate-900' : 'border-neutral-200 bg-white'} transition-all duration-300 ease-in-out transform hidden sm:flex h-full`,
+      )}
+    >
+      <aside className="flex h-full flex-col w-full break-words px-4 overflow-x-hidden columns-1">
+        {/* Top */}
+        <div className="mt-4 relative pb-2">
+          <div className="flex flex-col space-y-1">
             {navItems.map((item, idx) => {
-              if (item.position === 'bottom') {
+              if (item.position === 'top') {
                 return (
                   <Fragment key={idx}>
                     <div className="space-y-1">
@@ -92,20 +68,40 @@ export default function SideNav() {
               }
             })}
           </div>
-        </aside>
-        <div className="mt-[calc(calc(90vh)-40px)] relative">
-          <button
-            type="button"
-            className="absolute bottom-32 right-[-12px] flex h-6 w-6 items-center justify-center rounded-full bg-neutral-100 shadow-md hover:shadow-lg transition-shadow duration-300 ease-in-out"
-            onClick={toggleSidebar}
-          >
-            {isSidebarExpanded ? (
-              <ChevronLeft size={16} />
-            ) : (
-              <ChevronRight size={16} />
-            )}
-          </button>
         </div>
+        {/* Bottom */}
+        <div className="sticky bottom-0 mt-auto whitespace-nowrap mb-4 transition duration-200 block">
+          {navItems.map((item, idx) => {
+            if (item.position === 'bottom') {
+              return (
+                <Fragment key={idx}>
+                  <div className="space-y-1">
+                    <SideNavItem
+                      label={item.name}
+                      icon={item.icon}
+                      path={item.href}
+                      active={item.active}
+                      isSidebarExpanded={isSidebarExpanded}
+                    />
+                  </div>
+                </Fragment>
+              );
+            }
+          })}
+        </div>
+      </aside>
+
+      <div className="relative">
+        <button
+          type="button"
+          className={`absolute bottom-32 right-[-12px] flex h-6 w-6 items-center justify-center rounded-full shadow-md hover:shadow-lg transition-shadow duration-300 ease-in-out ${
+            isDark ? 'bg-neutral-800 text-white' : 'bg-neutral-100 text-neutral-700'
+          }`}
+          onClick={toggleSidebar}
+        >
+          {isSidebarExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+        </button>
+      </div>
     </div>
   );
 }
@@ -150,11 +146,7 @@ export const SideNavItem: React.FC<{
                 </div>
               </Link>
             </TooltipTrigger>
-            <TooltipContent
-              side="left"
-              className="px-3 py-1.5 text-xs"
-              sideOffset={10}
-            >
+            <TooltipContent side="left" className="px-3 py-1.5 text-xs" sideOffset={10}>
               <span>{label}</span>
             </TooltipContent>
           </Tooltip>

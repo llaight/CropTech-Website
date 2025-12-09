@@ -325,15 +325,25 @@ export default function InventoryPage() {
                 <h2 className="text-2xl font-bold text-slate-900">{selectedInventory.name}</h2>
                 <p className="text-3xl font-bold text-green-600 mt-2">P {selectedInventory.price.toFixed(2)}</p>
               </div>
-              <button
-                onClick={handleCloseModal}
-                className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                aria-label="Close modal"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex gap-2">
+                {/* Save button */}
+                <button
+                  onClick={() => {
+                    // Save logic here (e.g., update inventory, close modal)
+                    setIsModalOpen(false);
+                  }}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
+                >
+                  Save
+                </button>
+                {/* Cancel button */}
+                <button
+                  onClick={handleCloseModal}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
 
             <div className="p-6">
