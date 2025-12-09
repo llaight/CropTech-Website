@@ -72,7 +72,7 @@ export default function Home() {
   // Authenticated Dashboard
   if (auth) {
     return (
-      <div className={`min-h-screen ${isDark ? "bg-slate-900" : "bg-gradient-to-br from-slate-50 via-white to-slate-100"}`}>
+      <div className={`min-h-[calc(100dvh-4rem)] ${isDark ? "bg-slate-900" : "bg-gradient-to-br from-slate-50 via-white to-slate-100"} overflow-hidden`}>
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Header */}
           <div className="mb-8">
