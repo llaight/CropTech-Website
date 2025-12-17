@@ -221,7 +221,7 @@ export default function AuthForm({ mode }: Props) {
         {/* Additional Options */}
         {mode === "login" && (
           <div className="text-center">
-            <a href="#" className="text-sm text-green-400 hover:text-green-300 transition-colors">
+            <a href="/forgot-password" className="text-sm text-green-400 hover:text-green-300 transition-colors">
               Forgot your password?
             </a>
           </div>
