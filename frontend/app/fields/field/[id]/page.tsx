@@ -1,92 +1,339 @@
-import React from 'react';
-import PlantingCalendar from '../components/PlantingCalendar';
+import React from "react";
+import PlantingCalendar from "../components/PlantingCalendar";
 import BackButton from "../../../components/BackButton";
+import Link from "next/link";
 
-// Map Open-Meteo weather codes to human-readable descriptions
+/* Human-readable weather descriptions kept (no attribute removal) */
 const WEATHER_CODE_MAP: Record<number, string> = {
-  0: 'Clear sky',
-  1: 'Mainly clear',
-  2: 'Partly cloudy',
-  3: 'Overcast',
-  45: 'Fog',
-  48: 'Depositing rime fog',
-  51: 'Light drizzle',
-  53: 'Moderate drizzle',
-  55: 'Dense drizzle',
-  56: 'Freezing drizzle (light)',
-  57: 'Freezing drizzle (dense)',
-  61: 'Rain (slight)',
-  63: 'Rain (moderate)',
-  65: 'Rain (heavy)',
-  66: 'Freezing rain (light)',
-  67: 'Freezing rain (heavy)',
-  71: 'Snow fall (slight)',
-  73: 'Snow fall (moderate)',
-  75: 'Snow fall (heavy)',
-  77: 'Snow grains',
-  80: 'Rain showers (slight)',
-  81: 'Rain showers (moderate)',
-  82: 'Rain showers (violent)',
-  85: 'Snow showers (slight)',
-  86: 'Snow showers (heavy)',
-  95: 'Thunderstorm (slight or moderate)',
-  96: 'Thunderstorm with slight hail',
-  99: 'Thunderstorm with heavy hail',
+  0: "Clear sky",
+  1: "Mainly clear",
+  2: "Partly cloudy",
+  3: "Overcast",
+  45: "Fog",
+  48: "Depositing rime fog",
+  51: "Light drizzle",
+  53: "Moderate drizzle",
+  55: "Dense drizzle",
+  56: "Freezing drizzle (light)",
+  57: "Freezing drizzle (dense)",
+  61: "Rain (slight)",
+  63: "Rain (moderate)",
+  65: "Rain (heavy)",
+  66: "Freezing rain (light)",
+  67: "Freezing rain (heavy)",
+  71: "Snow fall (slight)",
+  73: "Snow fall (moderate)",
+  75: "Snow fall (heavy)",
+  77: "Snow grains",
+  80: "Rain showers (slight)",
+  81: "Rain showers (moderate)",
+  82: "Rain showers (violent)",
+  85: "Snow showers (slight)",
+  86: "Snow showers (heavy)",
+  95: "Thunderstorm (slight or moderate)",
+  96: "Thunderstorm with slight hail",
+  99: "Thunderstorm with heavy hail",
 };
 
 function describeWeatherCode(code: number | null | undefined) {
-  if (code == null) return null;
+  if (code == null) return "Unknown";
   const n = Number(code);
-  if (Number.isNaN(n)) return null;
+  if (Number.isNaN(n)) return "Unknown";
   return WEATHER_CODE_MAP[n] ?? `Weather code ${n}`;
 }
 
-// Server component that shows field + crop + weather details.
-// It will try to fetch the field record from the backend by id
-// and fall back to demo values if the API is unavailable.
+/* Simple svg icons for main weather categories */
+function WeatherIcon({ code, size = 48 }: { code: number | null | undefined; size?: number }) {
+  const s = size;
+  if (code == null) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="10" stroke="#9CA3AF" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+  const n = Number(code);
+  if (Number.isNaN(n)) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="10" stroke="#9CA3AF" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+
+  // Sun (bright radial)
+  if (n === 0) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <defs>
+          <radialGradient id="sunGrad" cx="50%" cy="40%">
+            <stop offset="0%" stopColor="#FFF1C9" />
+            <stop offset="60%" stopColor="#FDBA74" />
+            <stop offset="100%" stopColor="#FB923C" />
+          </radialGradient>
+        </defs>
+        <circle cx="12" cy="12" r="5" fill="url(#sunGrad)" />
+        <g stroke="#FB923C" strokeWidth="1.2" strokeLinecap="round">
+          <path d="M12 1.6v2.2" />
+          <path d="M12 20.2v2.2" />
+          <path d="M3.8 4.4l1.6 1.6" />
+          <path d="M18.6 17.2l1.6 1.6" />
+          <path d="M1.6 12h2.2" />
+          <path d="M20.2 12h2.2" />
+          <path d="M3.8 19.6l1.6-1.6" />
+          <path d="M18.6 6.4l1.6-1.6" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Partly cloudy (sun + cloud)
+  if (n === 1 || n === 2) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <defs>
+          <linearGradient id="pSun" x1="0" x2="1">
+            <stop offset="0%" stopColor="#FFF1C9" />
+            <stop offset="100%" stopColor="#FDBA74" />
+          </linearGradient>
+        </defs>
+        <circle cx="8.5" cy="8.5" r="3" fill="url(#pSun)" />
+        <path d="M6 15a4 4 0 010-8 6 6 0 0110.5 3 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+      </svg>
+    );
+  }
+
+  // Overcast / Cloud
+  if (n === 3) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <defs>
+          <linearGradient id="cloudG" x1="0" x2="1">
+            <stop offset="0%" stopColor="#E6EEF8" />
+            <stop offset="100%" stopColor="#CFE1F8" />
+          </linearGradient>
+        </defs>
+        <path d="M6 16a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="url(#cloudG)" />
+      </svg>
+    );
+  }
+
+  // Fog
+  if (n === 45 || n === 48) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M5 11a7 7 0 0114 0" stroke="#94A3B8" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+        <g stroke="#CBD5E1" strokeWidth="1.2" strokeLinecap="round">
+          <path d="M3 15h18" />
+          <path d="M3 18h18" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Drizzle
+  if (n === 51 || n === 53 || n === 55) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 13a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+        <g fill="#60A5FA">
+          <ellipse cx="9.5" cy="18" rx="0.9" ry="1.6" />
+          <ellipse cx="13.5" cy="18" rx="0.9" ry="1.6" />
+          <ellipse cx="16.5" cy="18" rx="0.9" ry="1.6" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Freezing drizzle / freezing rain
+  if (n === 56 || n === 57 || n === 66 || n === 67) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 13a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+        <g>
+          <path d="M10 18l-0.5 1.2" stroke="#60A5FA" strokeWidth="1.5" strokeLinecap="round" />
+          <path d="M13 18l-0.5 1.2" stroke="#9CA3AF" strokeWidth="1.5" strokeLinecap="round" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Rain
+  if (n === 61 || n === 63 || n === 65) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 14a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+        <g fill="#2563EB">
+          <path d="M9 17.6c-.5 1-1 1.6-1 1.6s-.9.6-1.2.1c-.3-.5.6-1.6.6-1.6s.4-.7 1.6-.9z" />
+          <path d="M13 17.6c-.5 1-1 1.6-1 1.6s-.9.6-1.2.1c-.3-.5.6-1.6.6-1.6s.4-.7 1.6-.9z" />
+          <path d="M17 17.6c-.5 1-1 1.6-1 1.6s-.9.6-1.2.1c-.3-.5.6-1.6.6-1.6s.4-.7 1.6-.9z" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Showers
+  if (n === 80 || n === 81) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 13a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+        <g fill="#1D4ED8">
+          <ellipse cx="9" cy="17.6" rx="0.9" ry="1.6" />
+          <ellipse cx="13" cy="17.6" rx="0.9" ry="1.6" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Violent showers
+  if (n === 82) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 13a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#D1E3F9" />
+        <g fill="#1E40AF">
+          <path d="M10 17l-1 2" />
+          <path d="M13 17l-1 2" />
+        </g>
+        <path d="M12 13l1.5-3-2 .5.5-2" fill="#F59E0B" />
+      </svg>
+    );
+  }
+
+  // Snow / showers-snow
+  if (n === 71 || n === 73 || n === 75 || n === 85 || n === 86) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 14a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+        <g stroke="#60A5FA" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 18l0-2" />
+          <path d="M11 18l0-2" />
+          <path d="M13 18l0-2" />
+          <path d="M15 18l0-2" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Snow grains
+  if (n === 77) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 13a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+        <g fill="#93C5FD">
+          <circle cx="9.5" cy="18" r="0.4" />
+          <circle cx="12.5" cy="18" r="0.4" />
+          <circle cx="15.5" cy="18" r="0.4" />
+        </g>
+      </svg>
+    );
+  }
+
+  // Thunderstorm
+  if (n === 95 || n === 96 || n === 99) {
+    return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+        <path d="M6 14a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8" />
+        <path d="M11 13l-2 4h3l-1 3 4-6h-3l1-3z" fill="#FBBF24" />
+      </svg>
+    );
+  }
+
+  // fallback -> colored cloud
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" aria-hidden>
+      <path d="M6 16a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#DDECFB" />
+    </svg>
+  );
+}
+
+const TempIcon = ({ size = 30 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <defs>
+      <linearGradient id="gTemp" x1="0" x2="1"><stop offset="0%" stopColor="#FFF1C9"/><stop offset="100%" stopColor="#FB923C"/></linearGradient>
+    </defs>
+    <rect x="10.5" y="3" width="3" height="12" rx="1.5" fill="url(#gTemp)"/>
+    <circle cx="12" cy="18.5" r="3" fill="#FB923C"/>
+  </svg>
+);
+
+const HumidityIcon = ({ size = 30 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path d="M12 3s5 5.5 5 9.5A5 5 0 017 12.5C7 8.5 12 3 12 3z" fill="#60A5FA"/>
+    <path d="M12 3s-2.2 2.4-2.8 4.5" stroke="#93C5FD" strokeWidth="0.8" strokeLinecap="round" fill="none"/>
+  </svg>
+);
+
+const PrecipProbIcon = ({ size = 30 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path d="M5 8h14" stroke="#7C3AED" strokeWidth="1.5" strokeLinecap="round"/>
+    <rect x="4.5" y="10.5" width="3" height="5.5" rx="1.2" fill="#EDE9FE"/>
+    <rect x="9.5" y="10.5" width="3" height="3.5" rx="1.2" fill="#C7B3FF"/>
+    <rect x="14.5" y="10.5" width="3" height="2" rx="1.2" fill="#7C3AED"/>
+  </svg>
+);
+
+const PrecipIcon = ({ size = 30 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path d="M7 10a5 5 0 0110 0 4 4 0 01-1 7H7a4 4 0 01-1-7z" fill="#DCEFFE"/>
+    <g fill="#3B82F6">
+      <path d="M9.5 18.5c-.4.9-.8 1.3-1 1.3s-.6.4-0.8.1c-.2-.3.4-1.1.4-1.1s.3-.5 1.4-.7z"/>
+      <path d="M13.5 18.5c-.4.9-.8 1.3-1 1.3s-.6.4-0.8.1c-.2-.3.4-1.1.4-1.1s.3-.5 1.4-.7z"/>
+    </g>
+  </svg>
+);
+
+const CloudIcon = ({ size = 30 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path d="M6 14a4 4 0 010-8 6 6 0 0111 2 4 4 0 01-1 7H6z" fill="#E6EEF8"/>
+  </svg>
+);
+
+const WindIcon = ({ size = 30 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path d="M3 8h12a3 3 0 010 6H5" stroke="#06B6D4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M5 16h8" stroke="#7DD3FC" strokeWidth="1.2" strokeLinecap="round"/>
+  </svg>
+);
+
 export default async function FieldDetailPage({ params }: { params: { id: string } }) {
   const { id } = params;
 
-  // Default/demo values (fallback)
   let field: { id: string | number; name: string; location: string; area_ha: number } = {
     id,
     name: `Field ${id}`,
-    location: '14.5995,120.9842',
+    location: "14.5995,120.9842",
     area_ha: 1.25,
   };
 
-  // Try to fetch the real field from the backend (server-side). If the
-  // backend isn't available or returns no data, keep the defaults above.
   try {
-    const res = await fetch(`http://127.0.0.1:5001/api/fields?id=${encodeURIComponent(String(id))}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        // Backend returns either a single `field` or an array `fields`.
-        // If `fields` is returned, find the one matching the requested id.
-        let f = data.field ?? undefined;
-        if (!f && Array.isArray(data.fields)) {
-          f = data.fields.find((x: any) => String(x.id) === String(id));
-        }
-        if (f) {
-          field = {
-            id: f.id ?? id,
-            name: f.name ?? `Field ${id}`,
-            location: f.location ?? field.location,
-            area_ha: f.area_ha ?? field.area_ha,
-          };
-        }
+    const res = await fetch(
+      `http://127.0.0.1:5001/api/fields?id=${encodeURIComponent(String(id))}`,
+      { cache: "no-store" }
+    );
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      let f = data.field ?? undefined;
+      if (!f && Array.isArray(data.fields)) {
+        f = data.fields.find((x: any) => String(x.id) === String(id));
       }
+      if (f) {
+        field = {
+          id: f.id ?? id,
+          name: f.name ?? `Field ${id}`,
+          location: f.location ?? field.location,
+          area_ha: f.area_ha ?? field.area_ha,
+        };
+      }
+    }
   } catch (err) {
-    // network/backend unavailable
+    // ignore network/backend unavailable
   }
 
-  // Attempt to reverse-geocode the location into a city name by calling the backend
   let cityName: string | null = null;
-  // Parse coordinates once for reuse (reverse-geocode + weather fetch)
   let latNum: number | null = null;
   let lonNum: number | null = null;
-  if (field.location && typeof field.location === 'string' && field.location.includes(',')) {
-    const [latS, lonS] = field.location.split(',').map(s => s.trim());
+  if (field.location && typeof field.location === "string" && field.location.includes(",")) {
+    const [latS, lonS] = field.location.split(",").map((s) => s.trim());
     const lat = parseFloat(latS);
     const lon = parseFloat(lonS);
     if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
@@ -95,25 +342,20 @@ export default async function FieldDetailPage({ params }: { params: { id: string
     }
   }
 
-  // Reverse-geocode (server-side) if we have coordinates
   try {
     if (latNum !== null && lonNum !== null) {
-      try {
-        const gRes = await fetch(`http://127.0.0.1:5001/api/reverse-geocode?lat=${encodeURIComponent(String(latNum))}&lon=${encodeURIComponent(String(lonNum))}`, { cache: 'no-store' });
-        if (gRes.ok) {
-          const gData = await gRes.json().catch(() => ({}));
-          // Combine city and state when available, fall back to display_name
-          const parts: string[] = [];
-          if (gData.city) parts.push(gData.city);
-          if (gData.state) parts.push(gData.state);
-          if (parts.length > 0) {
-            cityName = parts.join(', ');
-          } else {
-            cityName = gData.display_name ?? null;
-          }
-        }
-      } catch (e) {
-        // ignore reverse geocode failures (backend now returns nulls on timeout)
+      const gRes = await fetch(
+        `http://127.0.0.1:5001/api/reverse-geocode?lat=${encodeURIComponent(
+          String(latNum)
+        )}&lon=${encodeURIComponent(String(lonNum))}`,
+        { cache: "no-store" }
+      );
+      if (gRes.ok) {
+        const gData = await gRes.json().catch(() => ({}));
+        const parts: string[] = [];
+        if (gData.city) parts.push(gData.city);
+        if (gData.state) parts.push(gData.state);
+        cityName = parts.length > 0 ? parts.join(", ") : gData.display_name ?? null;
       }
     }
   } catch (e) {
@@ -121,14 +363,13 @@ export default async function FieldDetailPage({ params }: { params: { id: string
   }
 
   const crop = {
-    name: 'Jasmine Rice',
-    planting_date: '2025-10-01',
-    expected_harvest_date: '2026-02-15',
-    health_status: 'Good',
-    notes: 'No major pests detected. Apply balanced NPK at 45 days.'
+    name: "Jasmine Rice",
+    planting_date: "2025-10-01",
+    expected_harvest_date: "2026-02-15",
+    health_status: "Good",
+    notes: "No major pests detected. Apply balanced NPK at 45 days.",
   };
 
-  // Weather object — only populated from the server. Initialize to nulls
   let weather: any = {
     id: null,
     date: null,
@@ -147,20 +388,18 @@ export default async function FieldDetailPage({ params }: { params: { id: string
     description: null,
   };
 
-  // Fetch live weather from backend (server-side). Use the parsed coordinates if available.
   if (latNum !== null && lonNum !== null) {
     try {
-      const wRes = await fetch('http://127.0.0.1:5001/api/fetch-weather', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const wRes = await fetch("http://127.0.0.1:5001/api/fetch-weather", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lat: latNum, lon: lonNum, field_id: Number(id) }),
-        cache: 'no-store',
+        cache: "no-store",
       });
       if (wRes.ok) {
         const wData = await wRes.json().catch(() => ({}));
         const w = wData.weather ?? {};
 
-        // Raw values mapped directly from backend where available
         const rawTemp = w.temperature ?? null;
         const rawRelHum = w.relative_humidity ?? null;
         const rawPrecipProb = w.precipitation_probability ?? null;
@@ -169,15 +408,19 @@ export default async function FieldDetailPage({ params }: { params: { id: string
         const rawWind = w.wind_speed_10m ?? null;
         const rawWindDir = w.wind_direction_10m ?? null;
 
-        // Convert/derive friendly fields
-        const tempC = rawTemp != null ? Number(rawTemp) : (w.temperature_c != null ? Number(w.temperature_c) : weather.temperature_c);
-        const relHum = rawRelHum != null ? Number(rawRelHum) : (w.humidity_percent != null ? Number(w.humidity_percent) : weather.relative_humidity);
-        // Wind: keep raw m/s if provided, also derive kph
+        const tempC =
+          rawTemp != null
+            ? Number(rawTemp)
+            : w.temperature_c != null
+            ? Number(w.temperature_c)
+            : weather.temperature_c;
+        const relHum =
+          rawRelHum != null ? Number(rawRelHum) : w.humidity_percent != null ? Number(w.humidity_percent) : weather.relative_humidity;
+
         let windKph = weather.wind_kph;
         if (rawWind != null) {
           const windNum = Number(rawWind);
           if (!Number.isNaN(windNum)) {
-            // If value looks like m/s (<=60), convert to kph, else assume kph
             windKph = windNum <= 60 ? +(windNum * 3.6).toFixed(1) : +windNum;
           }
         } else if (w.wind_kph != null) {
@@ -188,7 +431,7 @@ export default async function FieldDetailPage({ params }: { params: { id: string
           id: w.id ?? weather.id,
           date: w.date ?? weather.date,
           weather_code: w.weather_code ?? weather.weather_code,
-          temperature: rawTemp != null ? Number(rawTemp) : (w.temperature_c != null ? Number(w.temperature_c) : weather.temperature),
+          temperature: rawTemp != null ? Number(rawTemp) : w.temperature_c != null ? Number(w.temperature_c) : weather.temperature,
           temperature_c: tempC,
           relative_humidity: relHum,
           precipitation_probability: rawPrecipProb != null ? Number(rawPrecipProb) : weather.precipitation_probability,
@@ -208,67 +451,162 @@ export default async function FieldDetailPage({ params }: { params: { id: string
   }
 
   return (
-    <div className="min-h-screen p-8 bg-brand-hero">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-semibold text-white">{field.name}</h1>
-            <p className="text-sm text-white/90">Field ID: {field.id} • Location: {field.location}</p>
-            {cityName ? (
-              <p className="text-xs text-white/80">{cityName}</p>
-            ) : null}
-          </div>
-          <div>
-            {/* Reusable back icon */}
-            <BackButton href="/fields" className="hover:opacity-90" />
-          </div>
-        </div>
+    <div className="min-h-screen bg-brand-hero p-6">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 mb-6">
+          <div className="flex-1">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-xl font-extrabold text-slate-900">{field.name}</h1>
+                <p className="text-sm text-slate-500">
+                  Field ID: <span className="font-medium text-slate-700">{field.id}</span>
+                </p>
+                <p className="mt-1 text-sm text-slate-600 hidden sm:block">{cityName ?? field.location}</p>
+              </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white/80 p-6 rounded-xl shadow">
-            <h2 className="text-lg font-semibold mb-3">Current Weather</h2>
-            <strong><p className="text-sm text-slate-600 mb-2">{weather.description}</p></strong>
-            <ul className="text-sm space-y-1">
-              <li><strong>ID:</strong> {weather.id ?? '—'}</li>
-              <li><strong>Date:</strong> {weather.date ?? '—'}</li>
-              <li><strong>Weather code:</strong> {weather.weather_code ?? '—'}</li>
-              <li><strong>Temperature (°C):</strong> {weather.temperature_c ?? '—'}</li>
-              <li><strong>Relative humidity:</strong> {weather.relative_humidity ?? '—'} %</li>
-              <li><strong>Precipitation probability:</strong> {weather.precipitation_probability ?? '—'} %</li>
-              <li><strong>Precipitation:</strong> {weather.precipitation ?? '—'} mm</li>
-              <li><strong>Cloud cover:</strong> {weather.cloud_cover ?? '—'} %</li>
-              <li><strong>Wind speed (10m):</strong> {weather.wind_speed_10m ?? '—'} m/s</li>
-              <li><strong>Wind (kph):</strong> {weather.wind_kph ?? '—'} kph</li>
-              <li><strong>Wind direction (10m):</strong> {weather.wind_direction_10m ?? '—'}°</li>
-              <li><strong>Field ID:</strong> {weather.field_id ?? '—'}</li>
-              <li><strong>Location:</strong> {weather.location ?? field.location ?? '—'}</li>
-            </ul>
-          </div>
-
-          <div className="bg-white/80 p-6 rounded-xl shadow">
-            <h2 className="text-lg font-semibold mb-3">Crop Details</h2>
-            <p className="text-sm text-slate-600 mb-2"><strong>Crop:</strong> {crop.name}</p>
-            <ul className="text-sm space-y-1">
-              <li><strong>Planting date:</strong> {crop.planting_date}</li>
-              <li><strong>Expected harvest:</strong> {crop.expected_harvest_date}</li>
-              <li><strong>Health status:</strong> {crop.health_status}</li>
-              <li><strong>Notes:</strong> {crop.notes}</li>
-            </ul>
+              <div className="self-start">
+                <BackButton href="/fields" iconClassName="text-slate-900" />
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Planting / Harvest calendar (client component) */}
-        <PlantingCalendar
-          fieldId={field.id}
-          initialPlantingDate={crop.planting_date}
-          initialHarvestDate={crop.expected_harvest_date}
-        />
+        {/* Main grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Weather card */}
+          <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-2 rounded-lg bg-slate-50">
+                <WeatherIcon code={weather.weather_code} size={56} />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">{weather.description ?? "No data"}</h3>
+                <p className="text-sm text-slate-500">{weather.date ?? "—"}</p>
+              </div>
+            </div>
 
-        <div className="mt-6 bg-white/80 p-6 rounded-xl shadow">
-          <h3 className="font-semibold mb-2">Field Summary</h3>
-          <p className="text-sm">Area: {field.area_ha} ha</p>
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                  <TempIcon />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Temp (°C)</div>
+                  <div className="text-lg font-medium">{weather.temperature_c ?? "—"}</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                  <HumidityIcon />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Humidity</div>
+                  <div className="text-lg font-medium">{weather.relative_humidity ?? "—"}%</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                  <PrecipProbIcon />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Precip Prob</div>
+                  <div className="text-lg font-medium">{weather.precipitation_probability ?? "—"}%</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                  <PrecipIcon />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Precip (mm)</div>
+                  <div className="text-lg font-medium">{weather.precipitation ?? "—"}</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                  <CloudIcon />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Cloud Cover</div>
+                  <div className="text-lg font-medium">{weather.cloud_cover ?? "—"}%</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                  <WindIcon />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Wind</div>
+                  <div className="text-lg font-medium">{weather.wind_kph ?? "—"} kph</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 border-t pt-3 text-xs text-slate-500">
+              <div><strong>Weather Code:</strong> {weather.weather_code ?? "—"}</div>
+              <div><strong>Wind Dir (10m):</strong> {weather.wind_direction_10m ?? "—"}°</div>
+              <div><strong>Field ID (weather):</strong> {weather.field_id ?? "—"}</div>
+              <div><strong>Location (weather):</strong> {weather.location ?? field.location ?? "—"}</div>
+              <div><strong>Raw Temp Value:</strong> {weather.temperature ?? "—"}</div>
+              <div className="mt-2 text-xs text-slate-400">All weather attributes are shown for diagnostics and kept intact.</div>
+            </div>
+          </div>
+
+          {/* Crop details & planting calendar */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">{crop.name}</h2>
+                  <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date}</span></p>
+                </div>
+                <div className="text-sm text-slate-500">
+                  <div className="mb-1"><strong>Status:</strong> <span className="font-medium">{crop.health_status}</span></div>
+                  <div><strong>Area:</strong> <span className="font-medium">{field.area_ha} ha</span></div>
+                </div>
+              </div>
+
+              <div className="mt-4 text-sm text-slate-600">
+                <h4 className="font-medium mb-1">Notes</h4>
+                <p className="leading-relaxed">{crop.notes}</p>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+              <h3 className="text-lg font-semibold mb-4">Planting & Harvest Calendar</h3>
+              <PlantingCalendar
+                fieldId={field.id}
+                initialPlantingDate={crop.planting_date}
+                initialHarvestDate={crop.expected_harvest_date}
+              />
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+              <h3 className="text-lg font-semibold mb-3">Field Summary</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="p-3 bg-slate-50 rounded-lg">
+                  <div className="text-xs text-slate-500">Area</div>
+                  <div className="text-lg font-medium">{field.area_ha} ha</div>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-lg">
+                  <div className="text-xs text-slate-500">Location</div>
+                  <div className="text-lg font-medium">{field.location}</div>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-lg">
+                  <div className="text-xs text-slate-500">City</div>
+                  <div className="text-lg font-medium">{cityName ?? "—"}</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </div> 
     </div>
   );
 }
