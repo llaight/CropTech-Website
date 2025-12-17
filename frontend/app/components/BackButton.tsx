@@ -17,7 +17,7 @@ export default function BackButton({
   size = 36,
   className = "",
   label = "Back",
-  iconClassName = "text-white", // default
+  iconClassName = "text-slate-900", // default
 }: Props) {
   const router = useRouter();
   const handleClick = () => {
