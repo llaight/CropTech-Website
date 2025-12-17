@@ -102,14 +102,33 @@ def create_tables():
     # Ensure foreign key constraint for field_id exists if possible (skip if already present)
     # Note: adding FK constraints via ALTER while avoiding duplicates is more involved; keep simple for now
     
-    # inventory table
+    # inventory table - UPDATED with detailed sack information and condition categories
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS inventory(
                    item_id SERIAL PRIMARY KEY,
                    name TEXT NOT NULL,
-                   quantity INTEGER DEFAULT 0,
+                   price_per_unit FLOAT DEFAULT 0,
+                   
+                   -- Grains: 25kg and 50kg sacks
+                   sacks_of_grains_25kg INTEGER DEFAULT 0,
+                   sacks_of_grains_50kg INTEGER DEFAULT 0,
+                   
+                   -- Rice: 25kg and 50kg sacks
+                   sacks_of_rice_25kg INTEGER DEFAULT 0,
+                   sacks_of_rice_50kg INTEGER DEFAULT 0,
+                   
+                   -- Condition categories with "others" option
+                   grains_condition TEXT DEFAULT 'to sell',
+                   grains_condition_other TEXT,
+                   rice_condition TEXT DEFAULT 'to sell',
+                   rice_condition_other TEXT,
+                   
+                   -- General remarks/notes
+                   remarks TEXT,
+                   
                    type TEXT,
-                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE
+                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                    )       
             """)
     
@@ -159,6 +178,3 @@ def create_tables():
     conn.commit()
     cursor.close()
     conn.close()
-    
-
-    
