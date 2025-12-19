@@ -219,6 +219,470 @@ def list_users():
 
 
 # -------------------------
+# INVENTORY ENDPOINTS
+# -------------------------
+@bp.route("/inventory", methods=["POST"])
+def create_inventory_item():
+    """Create a new inventory item (rice variety) for the authenticated user."""
+    # Get user from token
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    data = request.get_json() or {}
+    
+    # Validate required fields
+    name = data.get("name")
+    if not name:
+        return jsonify({"message": "Rice variety name is required"}), 400
+
+    price_per_unit = data.get("price_per_unit", 0)
+    
+    # Sack quantities
+    sacks_of_grains_25kg = data.get("sacks_of_grains_25kg", 0)
+    sacks_of_grains_50kg = data.get("sacks_of_grains_50kg", 0)
+    sacks_of_rice_25kg = data.get("sacks_of_rice_25kg", 0)
+    sacks_of_rice_50kg = data.get("sacks_of_rice_50kg", 0)
+    
+    # Condition categories
+    grains_condition = data.get("grains_condition", "to sell")
+    grains_condition_other = data.get("grains_condition_other", "")
+    rice_condition = data.get("rice_condition", "to sell")
+    rice_condition_other = data.get("rice_condition_other", "")
+    
+    # Remarks
+    remarks = data.get("remarks", "")
+    
+    type_val = data.get("type", "rice_variety")
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO inventory (
+                name, price_per_unit, 
+                sacks_of_grains_25kg, sacks_of_grains_50kg,
+                sacks_of_rice_25kg, sacks_of_rice_50kg,
+                grains_condition, grains_condition_other,
+                rice_condition, rice_condition_other,
+                remarks, type, user_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING item_id, created_at;
+        """, (
+            name, price_per_unit,
+            sacks_of_grains_25kg, sacks_of_grains_50kg,
+            sacks_of_rice_25kg, sacks_of_rice_50kg,
+            grains_condition, grains_condition_other,
+            rice_condition, rice_condition_other,
+            remarks, type_val, user_id
+        ))
+        
+        row = cursor.fetchone()
+        conn.commit()
+        
+        if not row:
+            return jsonify({"message": "Failed to create inventory item"}), 500
+            
+        item_id, created_at = row
+        
+        # Convert created_at to ISO string
+        try:
+            created_iso = created_at.isoformat()
+        except Exception:
+            created_iso = str(created_at)
+            
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error creating inventory item", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    
+    # Calculate totals for response
+    total_sacks_of_grains = sacks_of_grains_25kg + sacks_of_grains_50kg
+    total_sacks_of_rice = sacks_of_rice_25kg + sacks_of_rice_50kg
+    total_weight_grains_kg = (sacks_of_grains_25kg * 25) + (sacks_of_grains_50kg * 50)
+    total_weight_rice_kg = (sacks_of_rice_25kg * 25) + (sacks_of_rice_50kg * 50)
+    
+    return jsonify({
+        "message": "Inventory item created successfully",
+        "item": {
+            "id": item_id,
+            "name": name,
+            "price_per_unit": price_per_unit,
+            
+            # Detailed sack counts
+            "sacks_of_grains_25kg": sacks_of_grains_25kg,
+            "sacks_of_grains_50kg": sacks_of_grains_50kg,
+            "sacks_of_rice_25kg": sacks_of_rice_25kg,
+            "sacks_of_rice_50kg": sacks_of_rice_50kg,
+            
+            # Totals
+            "total_sacks_of_grains": total_sacks_of_grains,
+            "total_sacks_of_rice": total_sacks_of_rice,
+            "total_weight_grains_kg": total_weight_grains_kg,
+            "total_weight_rice_kg": total_weight_rice_kg,
+            
+            # Condition categories
+            "grains_condition": grains_condition,
+            "grains_condition_other": grains_condition_other,
+            "rice_condition": rice_condition,
+            "rice_condition_other": rice_condition_other,
+            
+            # Remarks
+            "remarks": remarks,
+            
+            "type": type_val,
+            "user_id": user_id,
+            "created_at": created_iso
+        }
+    }), 201
+
+
+@bp.route("/inventory", methods=["GET"])
+def list_inventory():
+    """Get inventory items for the authenticated user."""
+    # Get user from token
+    auth = request.headers.get("Authorization")
+    user_id = None
+    
+    if auth and auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            user_id = payload.get("user_id")
+        except Exception:
+            user_id = None
+    
+    # If no token, check for user_id in query params
+    if not user_id:
+        user_id = request.args.get("user_id")
+    
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        if user_id:
+            cursor.execute("""
+                SELECT 
+                    item_id, name, price_per_unit, 
+                    sacks_of_grains_25kg, sacks_of_grains_50kg,
+                    sacks_of_rice_25kg, sacks_of_rice_50kg,
+                    grains_condition, grains_condition_other,
+                    rice_condition, rice_condition_other,
+                    remarks, type, user_id, created_at 
+                FROM inventory 
+                WHERE user_id=%s 
+                ORDER BY created_at DESC;
+            """, (user_id,))
+        else:
+            cursor.execute("""
+                SELECT 
+                    item_id, name, price_per_unit, 
+                    sacks_of_grains_25kg, sacks_of_grains_50kg,
+                    sacks_of_rice_25kg, sacks_of_rice_50kg,
+                    grains_condition, grains_condition_other,
+                    rice_condition, rice_condition_other,
+                    remarks, type, user_id, created_at 
+                FROM inventory 
+                ORDER BY created_at DESC;
+            """)
+        
+        rows = cursor.fetchall()
+        inventory_items = []
+        
+        for row in rows:
+            (item_id, name, price_per_unit, 
+             sacks_of_grains_25kg, sacks_of_grains_50kg,
+             sacks_of_rice_25kg, sacks_of_rice_50kg,
+             grains_condition, grains_condition_other,
+             rice_condition, rice_condition_other,
+             remarks, type_val, uid, created_at) = row
+            
+            # Convert created_at to ISO string
+            try:
+                created_iso = created_at.isoformat()
+            except Exception:
+                created_iso = str(created_at)
+            
+            # Calculate totals
+            total_sacks_of_grains = sacks_of_grains_25kg + sacks_of_grains_50kg
+            total_sacks_of_rice = sacks_of_rice_25kg + sacks_of_rice_50kg
+            total_weight_grains_kg = (sacks_of_grains_25kg * 25) + (sacks_of_grains_50kg * 50)
+            total_weight_rice_kg = (sacks_of_rice_25kg * 25) + (sacks_of_rice_50kg * 50)
+            
+            # Determine display condition
+            grains_display_condition = grains_condition
+            if grains_condition == "others" and grains_condition_other:
+                grains_display_condition = grains_condition_other
+            
+            rice_display_condition = rice_condition
+            if rice_condition == "others" and rice_condition_other:
+                rice_display_condition = rice_condition_other
+            
+            inventory_items.append({
+                "id": item_id,
+                "name": name,
+                "price": price_per_unit,
+                
+                # Detailed sack counts
+                "sacks_of_grains_25kg": sacks_of_grains_25kg,
+                "sacks_of_grains_50kg": sacks_of_grains_50kg,
+                "sacks_of_rice_25kg": sacks_of_rice_25kg,
+                "sacks_of_rice_50kg": sacks_of_rice_50kg,
+                
+                # Totals
+                "total_sacks_of_grains": total_sacks_of_grains,
+                "total_sacks_of_rice": total_sacks_of_rice,
+                "total_weight_grains_kg": total_weight_grains_kg,
+                "total_weight_rice_kg": total_weight_rice_kg,
+                
+                # Condition categories
+                "grains_condition": grains_condition,
+                "grains_condition_other": grains_condition_other,
+                "grains_display_condition": grains_display_condition,
+                "rice_condition": rice_condition,
+                "rice_condition_other": rice_condition_other,
+                "rice_display_condition": rice_display_condition,
+                
+                # Remarks
+                "remarks": remarks,
+                
+                "type": type_val,
+                "user_id": uid,
+                "created_at": created_iso
+            })
+            
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching inventory", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"inventory": inventory_items}), 200
+
+
+@bp.route("/inventory/<int:item_id>", methods=["PUT"])
+def update_inventory_item(item_id):
+    """Update an inventory item."""
+    # Get user from token
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    data = request.get_json() or {}
+    
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # First check if item belongs to user
+        cursor.execute("SELECT user_id FROM inventory WHERE item_id=%s", (item_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            return jsonify({"message": "Inventory item not found"}), 404
+        
+        if row[0] != user_id:
+            return jsonify({"message": "Not authorized to update this item"}), 403
+        
+        # Build update query based on provided fields
+        updates = []
+        values = []
+        
+        # Detailed sack counts
+        if "sacks_of_grains_25kg" in data:
+            updates.append("sacks_of_grains_25kg = %s")
+            values.append(data["sacks_of_grains_25kg"])
+        
+        if "sacks_of_grains_50kg" in data:
+            updates.append("sacks_of_grains_50kg = %s")
+            values.append(data["sacks_of_grains_50kg"])
+        
+        if "sacks_of_rice_25kg" in data:
+            updates.append("sacks_of_rice_25kg = %s")
+            values.append(data["sacks_of_rice_25kg"])
+        
+        if "sacks_of_rice_50kg" in data:
+            updates.append("sacks_of_rice_50kg = %s")
+            values.append(data["sacks_of_rice_50kg"])
+        
+        # Condition categories
+        if "grains_condition" in data:
+            updates.append("grains_condition = %s")
+            values.append(data["grains_condition"])
+        
+        if "grains_condition_other" in data:
+            updates.append("grains_condition_other = %s")
+            values.append(data["grains_condition_other"])
+        
+        if "rice_condition" in data:
+            updates.append("rice_condition = %s")
+            values.append(data["rice_condition"])
+        
+        if "rice_condition_other" in data:
+            updates.append("rice_condition_other = %s")
+            values.append(data["rice_condition_other"])
+        
+        # Remarks
+        if "remarks" in data:
+            updates.append("remarks = %s")
+            values.append(data["remarks"])
+        
+        # Basic fields
+        if "price_per_unit" in data:
+            updates.append("price_per_unit = %s")
+            values.append(data["price_per_unit"])
+        
+        if "name" in data:
+            updates.append("name = %s")
+            values.append(data["name"])
+        
+        if updates:
+            query = f"UPDATE inventory SET {', '.join(updates)} WHERE item_id = %s RETURNING *"
+            values.append(item_id)
+            
+            cursor.execute(query, tuple(values))
+            updated_row = cursor.fetchone()
+            conn.commit()
+            
+            if updated_row:
+                # Parse the returned row
+                (item_id, name, price_per_unit, 
+                 sacks_of_grains_25kg, sacks_of_grains_50kg,
+                 sacks_of_rice_25kg, sacks_of_rice_50kg,
+                 grains_condition, grains_condition_other,
+                 rice_condition, rice_condition_other,
+                 remarks, type_val, uid, created_at) = updated_row
+                
+                # Calculate totals
+                total_sacks_of_grains = sacks_of_grains_25kg + sacks_of_grains_50kg
+                total_sacks_of_rice = sacks_of_rice_25kg + sacks_of_rice_50kg
+                total_weight_grains_kg = (sacks_of_grains_25kg * 25) + (sacks_of_grains_50kg * 50)
+                total_weight_rice_kg = (sacks_of_rice_25kg * 25) + (sacks_of_rice_50kg * 50)
+                
+                try:
+                    created_iso = created_at.isoformat()
+                except Exception:
+                    created_iso = str(created_at)
+                
+                return jsonify({
+                    "message": "Inventory item updated successfully",
+                    "item": {
+                        "id": item_id,
+                        "name": name,
+                        "price": price_per_unit,
+                        
+                        # Detailed sack counts
+                        "sacks_of_grains_25kg": sacks_of_grains_25kg,
+                        "sacks_of_grains_50kg": sacks_of_grains_50kg,
+                        "sacks_of_rice_25kg": sacks_of_rice_25kg,
+                        "sacks_of_rice_50kg": sacks_of_rice_50kg,
+                        
+                        # Totals
+                        "total_sacks_of_grains": total_sacks_of_grains,
+                        "total_sacks_of_rice": total_sacks_of_rice,
+                        "total_weight_grains_kg": total_weight_grains_kg,
+                        "total_weight_rice_kg": total_weight_rice_kg,
+                        
+                        # Condition categories
+                        "grains_condition": grains_condition,
+                        "grains_condition_other": grains_condition_other,
+                        "rice_condition": rice_condition,
+                        "rice_condition_other": rice_condition_other,
+                        
+                        # Remarks
+                        "remarks": remarks,
+                        
+                        "type": type_val,
+                        "user_id": uid,
+                        "created_at": created_iso
+                    }
+                }), 200
+        
+        return jsonify({"message": "No fields to update"}), 400
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error updating inventory item", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+
+
+@bp.route("/inventory/<int:item_id>", methods=["DELETE"])
+def delete_inventory_item(item_id):
+    """Delete an inventory item."""
+    # Get user from token
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # First check if item belongs to user
+        cursor.execute("SELECT user_id FROM inventory WHERE item_id=%s", (item_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            return jsonify({"message": "Inventory item not found"}), 404
+        
+        if row[0] != user_id:
+            return jsonify({"message": "Not authorized to delete this item"}), 403
+        
+        cursor.execute("DELETE FROM inventory WHERE item_id=%s", (item_id,))
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error deleting inventory item", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"message": "Inventory item deleted successfully"}), 200
+
+
+# -------------------------
 # Fields endpoints
 # -------------------------
 @bp.route("/fields", methods=["POST"]) 
