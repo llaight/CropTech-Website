@@ -1,5 +1,11 @@
 "use client";
 import React, { useEffect, useState } from "react";
+import Image from "next/image";
+
+// Import your local PNG files
+import waterIcon from "./water.png";
+import fertilizerIcon from "./fertilizer.png";
+import pesticideIcon from "./pesticide.png";
 
 interface Props {
   fieldId: string | number;
@@ -14,56 +20,65 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
   const [harvestDate, setHarvestDate] = useState<string>(initialHarvestDate ?? "");
   const [events, setEvents] = useState<Record<string, { watered?: boolean; fertilizer?: boolean; pesticide?: boolean; note?: string }>>({});
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // Load dates and events on component mount
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
+      // Load dates
+      const rawDates = localStorage.getItem(storageKey);
+      if (rawDates) {
+        const parsed = JSON.parse(rawDates);
         setPlantingDate(parsed.planting ?? initialPlantingDate ?? "");
         setHarvestDate(parsed.harvest ?? initialHarvestDate ?? "");
       } else {
         setPlantingDate(initialPlantingDate ?? "");
         setHarvestDate(initialHarvestDate ?? "");
       }
-    } catch (e) {
-      setPlantingDate(initialPlantingDate ?? "");
-      setHarvestDate(initialHarvestDate ?? "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fieldId]);
 
+      // Load events
+      const rawEvents = localStorage.getItem(eventsKey);
+      if (rawEvents) {
+        setEvents(JSON.parse(rawEvents));
+      }
+    } catch (e) {
+      console.error("Error loading from localStorage:", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fieldId, initialPlantingDate, initialHarvestDate, storageKey, eventsKey]);
+
+  // Save dates when they change
   useEffect(() => {
+    if (isLoading) return;
+    
     const payload = { planting: plantingDate, harvest: harvestDate };
     try {
       localStorage.setItem(storageKey, JSON.stringify(payload));
     } catch (e) {
-      // ignore localStorage errors
+      console.error("Error saving dates to localStorage:", e);
     }
-  }, [plantingDate, harvestDate, storageKey]);
+  }, [plantingDate, harvestDate, storageKey, isLoading]);
 
-  // load/save events
+  // Save events when they change
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(eventsKey);
-      if (raw) setEvents(JSON.parse(raw));
-    } catch (e) {
-      // ignore
-    }
-  }, [eventsKey]);
-
-  useEffect(() => {
+    if (isLoading) return;
+    
     try {
       localStorage.setItem(eventsKey, JSON.stringify(events));
-    } catch (e) {}
-  }, [events, eventsKey]);
+    } catch (e) {
+      console.error("Error saving events to localStorage:", e);
+    }
+  }, [events, eventsKey, isLoading]);
 
   function clearDates() {
     setPlantingDate("");
     setHarvestDate("");
     try {
       localStorage.removeItem(storageKey);
-    } catch (e) {}
+    } catch (e) {
+      console.error("Error clearing dates:", e);
+    }
   }
 
   function formatDateKey(d: Date) {
@@ -92,13 +107,12 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
       end = new Date(harvestDate + 'T00:00:00');
     } else {
       end = new Date(start);
-      end.setMonth(end.getMonth() + 2); // show 3 months by default
+      end.setMonth(end.getMonth() + 2);
     }
     return getMonthsBetween(start, end);
   }, [plantingDate, harvestDate]);
 
   const [visibleMonthIndex, setVisibleMonthIndex] = useState<number>(0);
-  // reset visible month when planting date changes
   useEffect(() => setVisibleMonthIndex(0), [plantingDate, calendarRanges.length]);
 
   function toggleEventForDate(dateKey: string, key: 'watered' | 'fertilizer' | 'pesticide') {
@@ -132,14 +146,18 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      // ignore export errors
+      console.error("Error exporting CSV:", e);
     }
   }
 
   function clearAllEvents() {
     if (!confirm('Clear all recorded events for this field? This cannot be undone.')) return;
     setEvents({});
-    try { localStorage.removeItem(eventsKey); } catch (e) {}
+    try { 
+      localStorage.removeItem(eventsKey); 
+    } catch (e) {
+      console.error("Error clearing events:", e);
+    }
     setSelectedDate(null);
   }
 
@@ -214,18 +232,42 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
               </div>
             </div>
 
-            {/* Legend for colored dots */}
+            {/* Legend for event icons */}
             <div className="flex items-center gap-4 text-sm text-slate-700">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 bg-blue-500 rounded-full" />
+                <div className="w-5 h-5 flex items-center justify-center">
+                  <Image 
+                    src={waterIcon}
+                    alt="Watered" 
+                    width={16} 
+                    height={16} 
+                    className="w-4 h-4"
+                  />
+                </div>
                 <span>Watered</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 bg-yellow-500 rounded-full" />
+                <div className="w-5 h-5 flex items-center justify-center">
+                  <Image 
+                    src={fertilizerIcon}
+                    alt="Fertilizer" 
+                    width={16} 
+                    height={16} 
+                    className="w-4 h-4"
+                  />
+                </div>
                 <span>Fertilizer</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 bg-red-600 rounded-full" />
+                <div className="w-5 h-5 flex items-center justify-center">
+                  <Image 
+                    src={pesticideIcon}
+                    alt="Pesticide" 
+                    width={16} 
+                    height={16} 
+                    className="w-4 h-4"
+                  />
+                </div>
                 <span>Pesticide</span>
               </div>
             </div>
@@ -280,9 +322,39 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                           <div className="flex items-center justify-between">
                             <div className="text-sm">{day}</div>
                             <div className="flex items-center gap-1">
-                              {e?.watered && <span className="w-2 h-2 bg-blue-500 rounded-full" />}
-                              {e?.fertilizer && <span className="w-2 h-2 bg-yellow-500 rounded-full" />}
-                              {e?.pesticide && <span className="w-2 h-2 bg-red-600 rounded-full" />}
+                              {e?.watered && (
+                                <div className="w-4 h-4 flex items-center justify-center">
+                                  <Image 
+                                    src={waterIcon}
+                                    alt="Watered" 
+                                    width={12} 
+                                    height={12} 
+                                    className="w-3 h-3"
+                                  />
+                                </div>
+                              )}
+                              {e?.fertilizer && (
+                                <div className="w-4 h-4 flex items-center justify-center">
+                                  <Image 
+                                    src={fertilizerIcon}
+                                    alt="Fertilizer" 
+                                    width={12} 
+                                    height={12} 
+                                    className="w-3 h-3"
+                                  />
+                                </div>
+                              )}
+                              {e?.pesticide && (
+                                <div className="w-4 h-4 flex items-center justify-center">
+                                  <Image 
+                                    src={pesticideIcon}
+                                    alt="Pesticide" 
+                                    width={12} 
+                                    height={12} 
+                                    className="w-3 h-3"
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
                         </button>
