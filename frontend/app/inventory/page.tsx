@@ -660,9 +660,22 @@ export default function InventoryPage() {
     const totalRiceSacks = inventoryData.reduce((sum, item) => sum + item.total_sacks_of_rice, 0);
     const totalGrainsWeight = inventoryData.reduce((sum, item) => sum + item.total_weight_grains_kg, 0);
     const totalRiceWeight = inventoryData.reduce((sum, item) => sum + item.total_weight_rice_kg, 0);
+    
+    // MODIFIED: Calculate total value excluding "to dispose" items
     const totalValue = inventoryData.reduce((sum, item) => {
-      const grainsValue = item.total_weight_grains_kg * item.price;
-      const riceValue = item.total_weight_rice_kg * item.price;
+      let grainsValue = 0;
+      let riceValue = 0;
+      
+      // Only include grains value if NOT "to dispose"
+      if (item.grains_condition !== "to dispose" && item.grains_display_condition !== "to dispose") {
+        grainsValue = item.total_weight_grains_kg * item.price;
+      }
+      
+      // Only include rice value if NOT "to dispose"
+      if (item.rice_condition !== "to dispose" && item.rice_display_condition !== "to dispose") {
+        riceValue = item.total_weight_rice_kg * item.price;
+      }
+      
       return sum + grainsValue + riceValue;
     }, 0);
 
@@ -734,14 +747,20 @@ export default function InventoryPage() {
             padding: 4px 8px;
             border-radius: 12px;
             font-size: 12px;
-            background: #e6fffa;
-            color: #234e52;
           }
+          .condition-sell { background: #d4edda; color: #155724; }
+          .condition-plant { background: #d1ecf1; color: #0c5460; }
+          .condition-dispose { background: #f8d7da; color: #721c24; }
+          .condition-other { background: #fff3cd; color: #856404; }
           .footer {
             margin-top: 40px;
             text-align: center;
             color: #a0aec0;
             font-size: 12px;
+          }
+          .value-excluded {
+            color: #dc3545;
+            text-decoration: line-through;
           }
           @media print {
             body { margin: 20px; }
@@ -753,6 +772,7 @@ export default function InventoryPage() {
         <div class="header">
           <h1>Rice Varieties Inventory Report</h1>
           <p>Detailed inventory of all rice varieties</p>
+          <p><small><em>Note: Items marked as "to dispose" are excluded from total value calculation</em></small></p>
         </div>
         
         <div class="date">
@@ -776,7 +796,7 @@ export default function InventoryPage() {
             </div>
             <div class="summary-item">
               <div class="summary-value">₱${totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
-              <div class="summary-label">Total Value</div>
+              <div class="summary-label">Total Value<br><small>(excluding "to dispose" items)</small></div>
             </div>
           </div>
         </div>
@@ -797,7 +817,37 @@ export default function InventoryPage() {
             ${inventoryData.map(item => {
               const grainsWeight = item.total_weight_grains_kg;
               const riceWeight = item.total_weight_rice_kg;
-              const totalValue = (grainsWeight + riceWeight) * item.price;
+              
+              // MODIFIED: Calculate item value excluding "to dispose" conditions
+              let grainsValue = 0;
+              let riceValue = 0;
+              let isGrainsDispose = false;
+              let isRiceDispose = false;
+              
+              // Check if grains should be excluded
+              if (item.grains_condition === "to dispose" || item.grains_display_condition === "to dispose") {
+                isGrainsDispose = true;
+              } else {
+                grainsValue = grainsWeight * item.price;
+              }
+              
+              // Check if rice should be excluded
+              if (item.rice_condition === "to dispose" || item.rice_display_condition === "to dispose") {
+                isRiceDispose = true;
+              } else {
+                riceValue = riceWeight * item.price;
+              }
+              
+              const totalValue = grainsValue + riceValue;
+              const isAnyDispose = isGrainsDispose || isRiceDispose;
+              
+              // Determine badge class based on condition
+              const getConditionClass = (condition: string) => {
+                if (condition === "to sell") return "condition-sell";
+                if (condition === "to plant") return "condition-plant";
+                if (condition === "to dispose") return "condition-dispose";
+                return "condition-other";
+              };
               
               return `
                 <tr>
@@ -806,14 +856,19 @@ export default function InventoryPage() {
                   <td>
                     ${item.total_sacks_of_grains.toLocaleString()} sacks<br>
                     <small>${grainsWeight.toLocaleString()} kg</small>
+                    ${isGrainsDispose ? '<br><small class="value-excluded">(value excluded)</small>' : ''}
                   </td>
                   <td>
                     ${item.total_sacks_of_rice.toLocaleString()} sacks<br>
                     <small>${riceWeight.toLocaleString()} kg</small>
+                    ${isRiceDispose ? '<br><small class="value-excluded">(value excluded)</small>' : ''}
                   </td>
-                  <td><span class="condition-badge">${item.grains_display_condition}</span></td>
-                  <td><span class="condition-badge">${item.rice_display_condition}</span></td>
-                  <td><strong>₱${totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong></td>
+                  <td><span class="condition-badge ${getConditionClass(item.grains_display_condition)}">${item.grains_display_condition}</span></td>
+                  <td><span class="condition-badge ${getConditionClass(item.rice_display_condition)}">${item.rice_display_condition}</span></td>
+                  <td>
+                    ${isAnyDispose ? '<small class="value-excluded">Excluded</small><br>' : ''}
+                    <strong>₱${totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>
+                  </td>
                 </tr>
               `;
             }).join('')}
@@ -829,6 +884,7 @@ export default function InventoryPage() {
         
         <div class="footer">
           <p>Rice Inventory Management System | Generated on ${new Date().toLocaleDateString()}</p>
+          <p><em>Note: Items marked as "to dispose" are excluded from total value calculation</em></p>
           <p class="no-print">Click Ctrl+P to print or save as PDF</p>
         </div>
         
