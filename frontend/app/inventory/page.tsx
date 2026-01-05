@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getCachedData } from "../lib/dataPreloader";
 
 // Define interfaces
 interface InventoryItem {
@@ -40,6 +41,27 @@ interface EditableInventoryItem extends Omit<InventoryItem,
   'total_weight_grains_kg' | 'total_weight_rice_kg' |
   'grains_display_condition' | 'rice_display_condition'> {
   // These will be calculated
+}
+
+// Delivery item interface
+interface DeliveryLineItem {
+  variety: string;
+  sack_size_kg: 25 | 50;
+  sacks: number;
+}
+
+// Delivery record interface
+interface DeliveryRecord {
+  id: number;
+  delivery_date: string; // ISO date string
+  recipient: string;
+  destination: string;
+  method: 'delivery' | 'pick-up';
+  status: 'to be delivered' | 'delivered' | 'cancelled' | 'returned';
+  items: DeliveryLineItem[];
+  total_quantity_kg: number; // total: sum of (sacks * sack_size_kg) for all items
+  notes: string;
+  created_at: string;
 }
 
 // Condition options - SEPARATE FOR GRAINS AND RICE
@@ -218,7 +240,9 @@ const DEFAULT_SAMPLE_INVENTORY: InventoryItem[] = [
 // Local storage keys
 const STORAGE_KEYS = {
   INVENTORY: 'rice_inventory_data',
-  LAST_SYNC: 'rice_inventory_last_sync'
+  LAST_SYNC: 'rice_inventory_last_sync',
+  DELIVERIES: 'rice_deliveries_data',
+  DELIVERIES_LAST_SYNC: 'rice_deliveries_last_sync'
 };
 
 export default function InventoryPage() {
@@ -250,6 +274,31 @@ export default function InventoryPage() {
   
   const [isSaving, setIsSaving] = useState(false);
 
+  // Deliveries state
+  const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
+  const [isSavingDelivery, setIsSavingDelivery] = useState(false);
+  const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
+  const [deliveryTab, setDeliveryTab] = useState<'upcoming' | 'completed' | 'returned_cancelled'>('upcoming');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'deliveries'>('inventory');
+  const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
+  const [newDelivery, setNewDelivery] = useState<{
+    delivery_date: string;
+    recipient: string;
+    destination: string;
+    method: 'delivery' | 'pick-up';
+    status: 'to be delivered' | 'delivered' | 'cancelled' | 'returned';
+    items: DeliveryLineItem[];
+    notes: string;
+  }>({
+    delivery_date: new Date().toISOString().slice(0, 10),
+    recipient: '',
+    destination: '',
+    method: 'delivery',
+    status: 'to be delivered',
+    items: [{ variety: '', sack_size_kg: 50, sacks: 1 }],
+    notes: '',
+  });
+
   // Load data from localStorage on initial render
   useEffect(() => {
     try {
@@ -260,18 +309,15 @@ export default function InventoryPage() {
         setUser(parsed);
       }
       
-      // Try to load inventory data from localStorage
-      const savedInventory = localStorage.getItem(STORAGE_KEYS.INVENTORY);
+      // Try to load preloaded cached data first (from login prefetch)
+      const cachedData = getCachedData();
+      let inventoryLoaded = false;
+      let deliveriesLoaded_local = false;
       
-      if (savedInventory) {
-        // Parse and validate the saved data
-        const parsedData = JSON.parse(savedInventory);
-        
-        // Validate that it's an array and has the basic structure
-        if (Array.isArray(parsedData) && parsedData.length > 0) {
-          // Ensure all items have required fields
-          const validatedData = parsedData.map((item: any) => {
-            // Calculate totals if they don't exist
+      if (cachedData) {
+        // Use preloaded inventory data if available
+        if (cachedData.inventory && Array.isArray(cachedData.inventory) && cachedData.inventory.length > 0) {
+          const validatedData = cachedData.inventory.map((item: any) => {
             const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
             const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
             const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
@@ -295,17 +341,85 @@ export default function InventoryPage() {
               rice_display_condition,
             };
           });
-          
           setInventoryData(validatedData);
-          console.log("Loaded inventory from localStorage:", validatedData.length, "items");
-        } else {
-          // If saved data is invalid, use default
-          setInventoryData(DEFAULT_SAMPLE_INVENTORY);
-          saveToLocalStorage(DEFAULT_SAMPLE_INVENTORY);
+          console.log("✅ Loaded inventory from preloaded cache:", validatedData.length, "items");
+          inventoryLoaded = true;
         }
-      } else {
-        // No saved data, start with empty array
-        setInventoryData([]);
+        
+        // Use preloaded deliveries data if available
+        if (cachedData.deliveries && Array.isArray(cachedData.deliveries)) {
+          setDeliveries(cachedData.deliveries);
+          console.log("✅ Loaded deliveries from preloaded cache:", cachedData.deliveries.length, "items");
+          deliveriesLoaded_local = true;
+          setDeliveriesLoaded(true); // Mark as loaded in state
+        }
+      }
+      
+      // Fallback to localStorage if no cached data
+      if (!inventoryLoaded) {
+        const savedInventory = localStorage.getItem(STORAGE_KEYS.INVENTORY);
+        
+        if (savedInventory) {
+          // Parse and validate the saved data
+          const parsedData = JSON.parse(savedInventory);
+          
+          // Validate that it's an array and has the basic structure
+          if (Array.isArray(parsedData) && parsedData.length > 0) {
+            // Ensure all items have required fields
+            const validatedData = parsedData.map((item: any) => {
+              // Calculate totals if they don't exist
+              const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
+              const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
+              const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
+              const total_weight_rice_kg = (item.sacks_of_rice_25kg * 25) + (item.sacks_of_rice_50kg * 50);
+              
+              const grains_display_condition = item.grains_condition === "others" && item.grains_condition_other 
+                ? item.grains_condition_other 
+                : item.grains_condition;
+              
+              const rice_display_condition = item.rice_condition === "others" && item.rice_condition_other 
+                ? item.rice_condition_other 
+                : item.rice_condition;
+              
+              return {
+                ...item,
+                total_sacks_of_grains,
+                total_sacks_of_rice,
+                total_weight_grains_kg,
+                total_weight_rice_kg,
+                grains_display_condition,
+                rice_display_condition,
+              };
+            });
+            
+            setInventoryData(validatedData);
+            console.log("Loaded inventory from localStorage:", validatedData.length, "items");
+          } else {
+            // If saved data is invalid, use default
+            setInventoryData(DEFAULT_SAMPLE_INVENTORY);
+            saveToLocalStorage(DEFAULT_SAMPLE_INVENTORY);
+          }
+        } else {
+          // No saved data, start with empty array
+          setInventoryData([]);
+        }
+      }
+      
+      // Fallback: Load deliveries from localStorage if not already loaded from cache
+      if (!deliveriesLoaded_local) {
+        try {
+          const savedDeliveries = localStorage.getItem(STORAGE_KEYS.DELIVERIES);
+          if (savedDeliveries) {
+            const parsed = JSON.parse(savedDeliveries) as DeliveryRecord[];
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setDeliveries(parsed);
+              setDeliveriesLoaded(true);
+              console.log("Loaded deliveries from localStorage:", parsed.length, "items");
+            }
+          }
+        } catch (e) {
+          console.error('Error loading deliveries from localStorage:', e);
+        }
       }
       
       setIsLoading(false);
@@ -318,6 +432,18 @@ export default function InventoryPage() {
     }
   }, []);
 
+  // Load deliveries from backend only when user navigates to deliveries tab
+  // Skip if already loaded from cache or localStorage
+  useEffect(() => {
+    if (activeTab === 'deliveries' && !deliveriesLoaded && user?.token) {
+      // Check if we have data - if not, fetch from backend
+      if (deliveries.length === 0) {
+        loadDeliveriesFromBackend();
+      }
+      setDeliveriesLoaded(true);
+    }
+  }, [activeTab, user?.token, deliveriesLoaded]);
+
   // Helper function to save data to localStorage
   const saveToLocalStorage = (data: InventoryItem[]) => {
     try {
@@ -326,6 +452,132 @@ export default function InventoryPage() {
       console.log("Saved inventory to localStorage:", data.length, "items");
     } catch (e) {
       console.error("Error saving to localStorage:", e);
+    }
+  };
+
+  // Helper to save delivery to backend
+  const saveDeliveryToBackend = async (delivery: {
+    delivery_date: string;
+    recipient: string;
+    destination: string;
+    method: 'delivery' | 'pick-up';
+    status: 'to be delivered' | 'delivered' | 'cancelled' | 'returned';
+    items: DeliveryLineItem[];
+    notes: string;
+  }): Promise<boolean> => {
+    try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) {
+        alert('You must be logged in to save deliveries.');
+        return false;
+      }
+
+      const res = await fetch('http://localhost:5001/api/deliveries', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(delivery),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        alert(`Error saving delivery: ${error.message}`);
+        return false;
+      }
+
+      console.log('Delivery saved to backend successfully');
+      return true;
+    } catch (e) {
+      console.error('Error saving delivery to backend:', e);
+      alert('Error saving delivery. Please try again.');
+      return false;
+    }
+  };
+
+  // Helper to load deliveries from backend
+  const loadDeliveriesFromBackend = async () => {
+    try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) {
+        console.log('No token found, skipping delivery load');
+        return;
+      }
+
+      const res = await fetch('http://localhost:5001/api/deliveries', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        console.error('Error loading deliveries');
+        return;
+      }
+
+      const data = await res.json();
+      if (data.deliveries && Array.isArray(data.deliveries)) {
+        setDeliveries(data.deliveries);
+        console.log('Loaded deliveries from backend:', data.deliveries.length, 'items');
+        await autoCompleteDueDeliveries(data.deliveries);
+      }
+    } catch (e) {
+      console.error('Error loading deliveries from backend:', e);
+    }
+  };
+
+  // Helper: update a delivery's status in backend
+  const updateDeliveryStatus = async (deliveryId: number, status: 'to be delivered' | 'delivered' | 'cancelled' | 'returned') => {
+    try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) return false;
+
+      const res = await fetch(`http://localhost:5001/api/deliveries/${deliveryId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        console.error('Failed to update delivery status');
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error('Error updating delivery status:', err);
+      return false;
+    }
+  };
+
+  // Auto-complete: mark due deliveries as delivered
+  const autoCompleteDueDeliveries = async (list: DeliveryRecord[]) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const toComplete = list.filter(d =>
+      d.status === 'to be delivered' && d.delivery_date.slice(0, 10) <= today
+    );
+    if (toComplete.length === 0) return;
+    try {
+      await Promise.all(toComplete.map(d => updateDeliveryStatus(d.id, 'delivered')));
+      // Reload to reflect changes after updates
+      const token = user?.token || localStorage.getItem('token');
+      if (token) {
+        const res = await fetch('http://localhost:5001/api/deliveries', {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const refreshed = await res.json();
+          if (refreshed.deliveries && Array.isArray(refreshed.deliveries)) {
+            setDeliveries(refreshed.deliveries);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Auto-complete deliveries failed:', e);
     }
   };
 
@@ -383,6 +635,19 @@ export default function InventoryPage() {
       
       // Remarks
       remarks: "",
+    });
+  };
+
+  const handleCloseDeliveryModal = () => {
+    setIsDeliveryModalOpen(false);
+    setNewDelivery({
+      delivery_date: new Date().toISOString().slice(0, 10),
+      recipient: '',
+      destination: '',
+      method: 'delivery',
+      status: 'to be delivered',
+      items: [{ variety: '', sack_size_kg: 50, sacks: 1 }],
+      notes: '',
     });
   };
 
@@ -565,6 +830,38 @@ export default function InventoryPage() {
         resolve();
       }, 500);
     });
+  };
+
+  // Save a delivery record
+  const handleSaveDelivery = async () => {
+    if (!newDelivery.delivery_date || !newDelivery.recipient || !newDelivery.destination) {
+      alert('Please complete delivery date, recipient, and destination.');
+      return;
+    }
+
+    // Validate all items
+    for (const [idx, item] of newDelivery.items.entries()) {
+      if (!item.variety || item.sacks <= 0) {
+        alert(`Please complete item #${idx + 1}: variety and a positive number of sacks.`);
+        return;
+      }
+    }
+
+    setIsSavingDelivery(true);
+    try {
+      const success = await saveDeliveryToBackend(newDelivery);
+      if (success) {
+        // Reload deliveries from backend
+        await loadDeliveriesFromBackend();
+        setIsDeliveryModalOpen(false);
+        handleCloseDeliveryModal();
+        alert('Delivery saved successfully!');
+      }
+    } catch (e) {
+      console.error('Error saving delivery:', e);
+    } finally {
+      setIsSavingDelivery(false);
+    }
   };
 
   const handleSackChange = (
@@ -983,72 +1280,127 @@ export default function InventoryPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Tab Navigation */}
+          <div className="mb-6 flex gap-3">
+            <button
+              onClick={() => setActiveTab('inventory')}
+              className={`px-6 py-3 rounded-xl font-semibold transition-all duration-200 flex items-center gap-2 ${
+                activeTab === 'inventory'
+                  ? 'bg-green-600 text-white shadow-lg'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              Inventory
+            </button>
+            <button
+              onClick={() => setActiveTab('deliveries')}
+              className={`px-6 py-3 rounded-xl font-semibold transition-all duration-200 flex items-center gap-2 ${
+                activeTab === 'deliveries'
+                  ? 'bg-green-600 text-white shadow-lg'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="1" y="3" width="15" height="13"></rect>
+                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                <circle cx="18.5" cy="18.5" r="2.5"></circle>
+              </svg>
+              Deliveries
+            </button>
+          </div>
+
+          {/* Inventory Tab Content */}
+          {activeTab === 'inventory' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Left Column - Rice Varieties List */}
-            <div className="bg-orange-50/90 rounded-2xl shadow-lg border border-green-300/50 overflow-hidden">
-              <div className="p-6 border-b border-slate-600/30">
+            <div className="bg-orange-50/90 rounded-2xl shadow-lg border border-green-300/50 overflow-hidden h-[720px] flex flex-col">
+              <div className="px-6 py-5 border-b border-slate-200/60">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-semibold text-slate-900">Your Rice Varieties</h2>
-                    <p className="text-sm text-slate-600 mt-1">
-                      Click on any item to edit • {inventoryData.length} items total
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                      <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">Your Rice Varieties</h2>
+                      <p className="text-xs text-slate-500 mt-0.5">Click any item to edit</p>
+                    </div>
+                    <span className="ml-2 text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded">
+                      {inventoryData.length}
+                    </span>
                   </div>
-                  <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
-                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  <button
+                    onClick={() => setIsAddModalOpen(true)}
+                    className="px-3 py-2 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition flex items-center gap-1"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                  </div>
+                    Add
+                  </button>
                 </div>
               </div>
               
               {/* Scrollable container for inventory list */}
-              <div className="p-0">
-                <div className="max-h-[500px] overflow-y-auto p-6">
-                  <div className="space-y-3">
+              <div className="flex-1 overflow-hidden">
+                <div className="h-full overflow-y-auto p-6">
+                  <div className="space-y-4">
                     {inventoryData.length > 0 ? (
                       inventoryData.map((item) => (
                         <div
                           key={item.id}
-                          className="group cursor-pointer p-4 rounded-xl border border-green-300/50 bg-white/60 hover:bg-white/80 hover:border-green-400 transition-all duration-200 shadow-sm hover:shadow-md"
+                          className="group cursor-pointer p-5 rounded-xl border border-slate-200/60 bg-white hover:border-green-300 hover:shadow-md transition-all duration-200"
                           onClick={() => handleInventoryClick(item)}
                         >
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <h3 className="font-semibold text-slate-900 group-hover:text-green-700 transition-colors">
-                                {item.name}
-                              </h3>
-                              <div className="mt-2 flex items-center gap-4">
-                                <p className="text-2xl font-bold text-green-600">P {item.price.toFixed(2)}</p>
-                                <div className="flex items-center gap-4 text-sm text-slate-500">
-                                  <span className="flex items-center gap-1">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                                    </svg>
-                                    {item.total_sacks_of_grains} sacks of grains
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                                    </svg>
-                                    {item.total_sacks_of_rice} sacks of rice
-                                  </span>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-3">
+                                <h3 className="font-semibold text-slate-900 group-hover:text-green-700 transition-colors truncate">
+                                  {item.name}
+                                </h3>
+                                <span className="px-2.5 py-1 text-xs bg-green-100 text-green-700 rounded-md font-semibold flex-shrink-0">
+                                  ₱ {item.price.toFixed(2)}/kg
+                                </span>
+                              </div>
+                              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                                <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-slate-600 font-medium flex items-center gap-1">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                                      </svg>
+                                      Grains
+                                    </span>
+                                    <span className="text-xs text-slate-600 bg-white px-2 py-0.5 rounded">
+                                      {item.total_sacks_of_grains} sacks • {item.total_weight_grains_kg.toLocaleString()} kg
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-slate-600 font-medium flex items-center gap-1">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                      </svg>
+                                      Rice
+                                    </span>
+                                    <span className="text-xs text-slate-600 bg-white px-2 py-0.5 rounded">
+                                      {item.total_sacks_of_rice} sacks • {item.total_weight_rice_kg.toLocaleString()} kg
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
-                              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-slate-600">Grains:</span>
-                                  <span className="font-medium">{item.total_weight_grains_kg.toLocaleString()} kg</span>
-                                  <span className="text-slate-500">({item.grains_display_condition})</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-slate-600">Rice:</span>
-                                  <span className="font-medium">{item.total_weight_rice_kg.toLocaleString()} kg</span>
-                                  <span className="text-slate-500">({item.rice_display_condition})</span>
-                                </div>
+                              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                                <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Grains: {item.grains_display_condition}</span>
+                                <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-700 font-medium">Rice: {item.rice_display_condition}</span>
                               </div>
                               {item.remarks && (
-                                <p className="text-sm text-slate-600 mt-2 flex items-start gap-1 line-clamp-2">
+                                <p className="text-sm text-slate-600 mt-3 flex items-start gap-1 line-clamp-2">
                                   <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
                                   </svg>
@@ -1056,7 +1408,7 @@ export default function InventoryPage() {
                                 </p>
                               )}
                             </div>
-                            <div className="ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                               <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                               </svg>
@@ -1085,9 +1437,9 @@ export default function InventoryPage() {
             </div>
 
             {/* Right Column - Details View */}
-            <div className="bg-orange-50/90 rounded-2xl shadow-lg border border-green-300/50 overflow-hidden">
+            <div className="bg-orange-50/90 rounded-2xl shadow-lg border border-green-300/50 overflow-hidden h-[720px] flex flex-col">
               {selectedInventory && totals ? (
-                <div className="p-6">
+                <div className="flex-1 overflow-y-auto p-6">
                   <div className="mb-6 pb-6 border-b border-slate-100">
                     <div className="flex items-start justify-between">
                       <div>
@@ -1181,21 +1533,411 @@ export default function InventoryPage() {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full min-h-[500px] p-6">
-                  <div className="w-20 h-20 rounded-2xl flex items-center justify-center mb-4">
-                    <svg className="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
+                // Show deliveries list
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  <div className="px-6 py-5 flex items-center justify-between mb-0 border-b border-slate-200/60">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                        <svg className="w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="1" y="3" width="15" height="13"></rect>
+                          <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                          <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                          <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-slate-900 font-bold text-lg leading-tight">Deliveries</p>
+                        <p className="text-xs text-slate-500 mt-0.5 leading-tight">Track all shipments</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setIsDeliveryModalOpen(true)}
+                      className="px-3 py-2 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition flex items-center gap-1.5"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add Delivery
+                    </button>
                   </div>
-                  <p className="text-slate-500 font-medium">Select a rice variety to view details</p>
-                  <p className="text-sm text-slate-400 mt-1">Click on any rice variety from the list</p>
+
+                  {deliveries.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full px-6 py-12">
+                      <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mb-6">
+                        <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                        </svg>
+                      </div>
+                      <p className="text-slate-700 font-semibold text-lg">No deliveries yet</p>
+                      <p className="text-sm text-slate-500 mt-2 text-center px-6">Create a delivery record to start tracking shipments</p>
+                      <button
+                        onClick={() => setIsDeliveryModalOpen(true)}
+                        className="mt-6 px-6 py-3 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition"
+                      >
+                        Create First Delivery
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto px-6 pb-6">
+                      {(() => {
+                        const upcomingList = deliveries
+                          .filter(d => d.status === 'to be delivered')
+                          .sort((a, b) => a.delivery_date.localeCompare(b.delivery_date));
+                        const completedList = deliveries
+                          .filter(d => d.status === 'delivered')
+                          .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
+                        const returnedCancelledList = deliveries
+                          .filter(d => d.status === 'returned' || d.status === 'cancelled')
+                          .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
+
+                        const tabBtn = (key: 'upcoming' | 'completed' | 'returned_cancelled', label: string, count: number) => (
+                          <button
+                            onClick={() => setDeliveryTab(key)}
+                            className={`${deliveryTab === key ? 'bg-white text-slate-900 shadow' : 'text-slate-600 hover:text-slate-800'} px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5`}
+                          >
+                            <span>{label}</span>
+                            <span className={`${deliveryTab === key ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'} px-1.5 py-0.5 rounded text-[10px] font-bold`}>{count}</span>
+                          </button>
+                        );
+
+                        return (
+                          <div className="space-y-5">
+                            <div className="flex items-center justify-between">
+                              <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1">
+                                {tabBtn('upcoming', 'Upcoming', upcomingList.length)}
+                                {tabBtn('completed', 'Completed', completedList.length)}
+                                {tabBtn('returned_cancelled', 'Returned/Cancelled', returnedCancelledList.length)}
+                              </div>
+                            </div>
+
+                            {/* Tab Content */}
+                            {deliveryTab === 'upcoming' && (
+                              <div className="space-y-4">
+                                {upcomingList.length === 0 ? (
+                                  <p className="text-sm text-slate-500">No upcoming deliveries.</p>
+                                ) : (
+                                  upcomingList.map(delivery => {
+                                    const statusConfig = {
+                                      'to be delivered': { bg: 'bg-blue-100', text: 'text-blue-700' },
+                                    };
+                                    const methodConfig = {
+                                      'delivery': { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+                                      'pick-up': { bg: 'bg-amber-100', text: 'text-amber-700' },
+                                    };
+                                    const statusConf = statusConfig['to be delivered'];
+                                    const methodConf = methodConfig[delivery.method as keyof typeof methodConfig];
+
+                                    return (
+                                      <div key={delivery.id} className="p-5 bg-gradient-to-br from-blue-50 to-blue-50/50 rounded-xl border border-blue-200/60 hover:border-blue-300 hover:shadow-md transition-all duration-200 cursor-pointer group">
+                                        <div className="flex justify-between items-start gap-4 mb-4">
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-1">
+                                              <p className="font-bold text-slate-900 text-base truncate group-hover:text-blue-700 transition">{delivery.recipient}</p>
+                                              <span className="text-xs font-semibold text-blue-600 bg-blue-200/50 px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0">#{delivery.id}</span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 mt-2">{new Date(delivery.delivery_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                                          </div>
+                                          <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
+                                            <span className={`${methodConf.bg} ${methodConf.text} px-3 py-1.5 text-xs rounded-md font-semibold whitespace-nowrap`}>
+                                              {delivery.method === 'delivery' ? 'Delivery' : 'Pick-up'}
+                                            </span>
+                                            <span className={`${statusConf.bg} ${statusConf.text} px-3 py-1.5 text-xs rounded-md font-semibold whitespace-nowrap`}>
+                                              To be delivered
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="mb-4 pt-4 border-t border-blue-100">
+                                          <p className="text-sm text-slate-600 mb-3">{delivery.destination}</p>
+                                          <div className="space-y-2.5">
+                                            {delivery.items.map((it, i) => (
+                                              <div key={i} className="flex justify-between items-center text-sm">
+                                                <span className="text-slate-700 font-medium">{it.variety}</span>
+                                                <span className="text-slate-600 bg-white/70 px-3 py-1 rounded text-xs font-medium">{it.sacks} × {it.sack_size_kg}kg</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center justify-between pt-3 border-t border-blue-100">
+                                          <span className="text-sm text-slate-500">Total Weight</span>
+                                          <div className="flex items-center gap-3">
+                                            <label className="text-xs text-slate-500 hidden sm:block">Change status:</label>
+                                            <select
+                                              defaultValue=""
+                                              onChange={async (e) => {
+                                                const v = e.target.value as 'delivered' | 'cancelled' | '';
+                                                if (!v) return;
+                                                const ok = await updateDeliveryStatus(delivery.id, v);
+                                                if (ok) {
+                                                  await loadDeliveriesFromBackend();
+                                                }
+                                              }}
+                                              className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-700"
+                                            >
+                                              <option value="" disabled>To be delivered</option>
+                                              <option value="delivered">Delivered</option>
+                                              <option value="cancelled">Cancelled</option>
+                                            </select>
+                                            <span className="text-base font-bold text-blue-700">{delivery.total_quantity_kg} kg</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
+
+                            {deliveryTab === 'completed' && (
+                              <div className="space-y-3">
+                                {completedList.length === 0 ? (
+                                  <p className="text-sm text-slate-500">No completed deliveries.</p>
+                                ) : (
+                                  completedList.map(delivery => {
+                                    const statusConf = { bg: 'bg-green-100', text: 'text-green-700' };
+                                    return (
+                                      <div key={delivery.id} className="p-4 bg-slate-50/60 rounded-lg border border-slate-200/60 hover:border-slate-300 hover:bg-slate-100/40 transition-all duration-200 cursor-pointer group">
+                                        <div className="flex justify-between items-start gap-3 mb-3">
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                              <p className="font-semibold text-slate-800 text-sm truncate">{delivery.recipient}</p>
+                                              <span className="text-xs font-semibold text-slate-500 bg-slate-200/50 px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0">#{delivery.id}</span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 mt-1.5">{new Date(delivery.delivery_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                                          </div>
+                                          <div className="flex items-center gap-2 flex-shrink-0">
+                                            <span className={`${statusConf.bg} ${statusConf.text} px-2.5 py-1 text-xs rounded font-semibold whitespace-nowrap`}>
+                                              Delivered
+                                            </span>
+                                            <select
+                                              defaultValue=""
+                                              onChange={async (e) => {
+                                                const v = e.target.value as 'returned' | '';
+                                                if (!v) return;
+                                                const ok = await updateDeliveryStatus(delivery.id, v);
+                                                if (ok) {
+                                                  await loadDeliveriesFromBackend();
+                                                }
+                                              }}
+                                              className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-700"
+                                            >
+                                              <option value="" disabled>Delivered</option>
+                                              <option value="returned">Mark as Returned</option>
+                                            </select>
+                                          </div>
+                                        </div>
+                                        <div className="space-y-1.5 text-xs mb-3">
+                                          {delivery.items.map((it, i) => (
+                                            <div key={i} className="flex justify-between text-slate-600">
+                                              <span>{it.variety}</span>
+                                              <span className="font-medium">{it.sacks}×{it.sack_size_kg}kg</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="flex justify-between items-center pt-2 border-t border-slate-200/50">
+                                          <span className="text-xs text-slate-500">Total</span>
+                                          <span className="text-sm font-bold text-slate-700">{delivery.total_quantity_kg} kg</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
+
+                            {deliveryTab === 'returned_cancelled' && (
+                              <div className="space-y-3">
+                                {returnedCancelledList.length === 0 ? (
+                                  <p className="text-sm text-slate-500">No returned or cancelled deliveries.</p>
+                                ) : (
+                                  returnedCancelledList.map(delivery => {
+                                    const statusConfig = {
+                                      'returned': { bg: 'bg-amber-100', text: 'text-amber-700' },
+                                      'cancelled': { bg: 'bg-red-100', text: 'text-red-700' },
+                                    };
+                                    const statusConf = statusConfig[delivery.status as 'returned' | 'cancelled'];
+                                    return (
+                                      <div key={delivery.id} className="p-4 bg-slate-50/60 rounded-lg border border-slate-200/60 hover:border-slate-300 hover:bg-slate-100/40 transition-all duration-200 cursor-pointer group">
+                                        <div className="flex justify-between items-start gap-3 mb-3">
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                              <p className="font-semibold text-slate-800 text-sm truncate">{delivery.recipient}</p>
+                                              <span className="text-xs font-semibold text-slate-500 bg-slate-200/50 px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0">#{delivery.id}</span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 mt-1.5">{new Date(delivery.delivery_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                                          </div>
+                                          <span className={`${statusConf.bg} ${statusConf.text} px-2.5 py-1 text-xs rounded font-semibold whitespace-nowrap flex-shrink-0`}>
+                                            {delivery.status}
+                                          </span>
+                                        </div>
+                                        <div className="space-y-1.5 text-xs mb-3">
+                                          {delivery.items.map((it, i) => (
+                                            <div key={i} className="flex justify-between text-slate-600">
+                                              <span>{it.variety}</span>
+                                              <span className="font-medium">{it.sacks}×{it.sack_size_kg}kg</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="flex justify-between items-center pt-2 border-t border-slate-200/50">
+                                          <span className="text-xs text-slate-500">Total</span>
+                                          <span className="text-sm font-bold text-slate-700">{delivery.total_quantity_kg} kg</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
-        </div>
-      </div>
+          )}
 
+          {/* Deliveries Tab Content */}
+          {activeTab === 'deliveries' && (
+            <div className="w-full">
+              <div className="bg-orange-50/90 rounded-2xl shadow-lg border border-green-300/50 overflow-hidden h-[720px] flex flex-col">
+                <div className="px-6 py-5 flex items-center justify-between mb-0 border-b border-slate-200/60">
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <p className="text-slate-900 font-bold text-lg leading-tight">Deliveries</p>
+                      <p className="text-xs text-slate-500 mt-0.5 leading-tight">Track all shipments</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsDeliveryModalOpen(true)}
+                    className="px-3 py-2 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition"
+                  >
+                    Add Delivery
+                  </button>
+                </div>
+
+                {deliveries.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full px-6 py-12">
+                    <p className="text-slate-700 font-semibold text-lg">No deliveries yet</p>
+                    <p className="text-sm text-slate-500 mt-2 text-center px-6">Create a delivery record to start tracking shipments</p>
+                    <button
+                      onClick={() => setIsDeliveryModalOpen(true)}
+                      className="mt-6 px-6 py-3 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition"
+                    >
+                      Create First Delivery
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto px-6 pb-6">
+                    {(() => {
+                      const upcomingList = deliveries
+                        .filter(d => d.status === 'to be delivered')
+                        .sort((a, b) => a.delivery_date.localeCompare(b.delivery_date));
+                      const completedList = deliveries
+                        .filter(d => d.status === 'delivered')
+                        .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
+                      const returnedCancelledList = deliveries
+                        .filter(d => d.status === 'returned' || d.status === 'cancelled')
+                        .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
+
+                      const tabBtn = (key: 'upcoming' | 'completed' | 'returned_cancelled', label: string, count: number) => (
+                        <button
+                          onClick={() => setDeliveryTab(key)}
+                          className={`${deliveryTab === key ? 'bg-white text-slate-900 shadow' : 'text-slate-600 hover:text-slate-800'} px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5`}
+                        >
+                          <span>{label}</span>
+                          <span className={`${deliveryTab === key ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'} px-1.5 py-0.5 rounded text-[10px] font-bold`}>{count}</span>
+                        </button>
+                      );
+
+                      return (
+                        <div className="space-y-5">
+                          <div className="flex items-center justify-between">
+                            <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1">
+                              {tabBtn('upcoming', 'Upcoming', upcomingList.length)}
+                              {tabBtn('completed', 'Completed', completedList.length)}
+                              {tabBtn('returned_cancelled', 'Returned/Cancelled', returnedCancelledList.length)}
+                            </div>
+                          </div>
+
+                          {/* Upcoming */}
+                          {deliveryTab === 'upcoming' && (
+                            <div className="space-y-4">
+                              {upcomingList.length === 0 ? (
+                                <p className="text-sm text-slate-500">No upcoming deliveries.</p>
+                              ) : (
+                                upcomingList.map(delivery => (
+                                  <div key={delivery.id} className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <p className="font-semibold text-slate-900">{delivery.recipient}</p>
+                                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">#{delivery.id}</span>
+                                    </div>
+                                    <p className="text-sm text-slate-600 mb-3">{new Date(delivery.delivery_date).toLocaleDateString()}</p>
+                                    <div className="space-y-1 text-sm mb-3">
+                                      {delivery.items.map((it, i) => (
+                                        <p key={i} className="text-slate-600">{it.variety} - {it.sacks}×{it.sack_size_kg}kg</p>
+                                      ))}
+                                    </div>
+                                    <div className="flex justify-between items-center pt-2 border-t border-blue-100">
+                                      <span className="text-xs text-slate-600">Total</span>
+                                      <span className="font-bold text-blue-700">{delivery.total_quantity_kg} kg</span>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+
+                          {/* Completed */}
+                          {deliveryTab === 'completed' && (
+                            <div className="space-y-3">
+                              {completedList.length === 0 ? (
+                                <p className="text-sm text-slate-500">No completed deliveries.</p>
+                              ) : (
+                                completedList.map(delivery => (
+                                  <div key={delivery.id} className="p-4 bg-green-50 rounded-lg border border-green-200">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <p className="font-semibold text-slate-900">{delivery.recipient}</p>
+                                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">#{delivery.id}</span>
+                                    </div>
+                                    <p className="text-sm text-slate-600 mb-2">{new Date(delivery.delivery_date).toLocaleDateString()}</p>
+                                    <p className="text-xs text-slate-600">Total: {delivery.total_quantity_kg} kg</p>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+
+                          {/* Returned/Cancelled */}
+                          {deliveryTab === 'returned_cancelled' && (
+                            <div className="space-y-3">
+                              {returnedCancelledList.length === 0 ? (
+                                <p className="text-sm text-slate-500">No returned or cancelled deliveries.</p>
+                              ) : (
+                                returnedCancelledList.map(delivery => (
+                                  <div key={delivery.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <p className="font-semibold text-slate-900">{delivery.recipient}</p>
+                                      <span className={`text-xs px-2 py-1 rounded ${delivery.status === 'returned' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                                        {delivery.status}
+                                      </span>
+                                    </div>
+                                    <p className="text-sm text-slate-600 mb-2">{new Date(delivery.delivery_date).toLocaleDateString()}</p>
+                                    <p className="text-xs text-slate-600">Total: {delivery.total_quantity_kg} kg</p>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
       {/* Edit Modal */}
       {isModalOpen && selectedInventory && totals && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -1503,7 +2245,7 @@ export default function InventoryPage() {
 
                 <div className="bg-green-50 rounded-xl p-4 border border-green-200">
                   <h4 className="font-semibold text-green-800 mb-2">Summary</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <p className="text-slate-600">Total Grains Sacks:</p>
                       <p className="font-bold text-lg text-slate-900">
@@ -1525,6 +2267,33 @@ export default function InventoryPage() {
                           {totals.total_weight_rice_kg.toLocaleString()} kg
                         </span>
                       </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Method *</label>
+                      <select
+                        value={newDelivery.method}
+                        onChange={(e) => setNewDelivery(prev => ({ ...prev, method: e.target.value as 'delivery' | 'pick-up' }))}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      >
+                        <option value="delivery">Delivery</option>
+                        <option value="pick-up">Pick-up</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Status *</label>
+                      <select
+                        value={newDelivery.status}
+                        onChange={(e) => setNewDelivery(prev => ({ ...prev, status: e.target.value as 'to be delivered' | 'delivered' | 'cancelled' | 'returned' }))}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      >
+                        <option value="to be delivered">To be delivered</option>
+                        <option value="delivered">Delivered</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="returned">Returned</option>
+                      </select>
+                    </div>
+                  </div>
+
                     </div>
                   </div>
                 </div>
@@ -1887,6 +2656,223 @@ export default function InventoryPage() {
           </div>
         </div>
       )}
+
+      {/* Delivery Modal */}
+      {isDeliveryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-200">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-start z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                  <svg className="w-6 h-6 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h10v8H3zM13 10h4l3 3v2h-7V10z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Add Delivery</h2>
+                  <p className="text-slate-600 mt-1">Record a delivery transaction</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveDelivery}
+                  disabled={isSavingDelivery}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isSavingDelivery ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Delivery'
+                  )}
+                </button>
+                <button
+                  onClick={handleCloseDeliveryModal}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Delivery Date *</label>
+                    <input
+                      type="date"
+                      value={newDelivery.delivery_date}
+                      onChange={(e) => setNewDelivery(prev => ({ ...prev, delivery_date: e.target.value }))}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Recipient/Customer *</label>
+                    <input
+                      type="text"
+                      value={newDelivery.recipient}
+                      onChange={(e) => setNewDelivery(prev => ({ ...prev, recipient: e.target.value }))}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="e.g., Juan Dela Cruz"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Method *</label>
+                    <select
+                      value={newDelivery.method}
+                      onChange={(e) => setNewDelivery(prev => ({ ...prev, method: e.target.value as 'delivery' | 'pick-up' }))}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="delivery">Delivery</option>
+                      <option value="pick-up">Pick-up</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Status *</label>
+                    <select
+                      value={newDelivery.status}
+                      onChange={(e) => setNewDelivery(prev => ({ ...prev, status: e.target.value as 'to be delivered' | 'delivered' | 'cancelled' | 'returned' }))}
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="to be delivered">To be delivered</option>
+                      <option value="delivered">Delivered</option>
+                      <option value="cancelled">Cancelled</option>
+                      <option value="returned">Returned</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Destination</label>
+                  <input
+                    type="text"
+                    value={newDelivery.destination}
+                    onChange={(e) => setNewDelivery(prev => ({ ...prev, destination: e.target.value }))}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="e.g., Barangay San Isidro, Nueva Ecija"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-4">Delivery Items *</label>
+                  
+                  {newDelivery.items.map((item, idx) => (
+                    <div key={idx} className="mb-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                      <div className="grid grid-cols-1 md:grid-cols-9 gap-3 mb-3">
+                        <div className="md:col-span-5">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Variety</label>
+                          <select
+                            value={item.variety}
+                            onChange={(e) => setNewDelivery(prev => ({
+                              ...prev,
+                              items: prev.items.map((row, i) => i === idx ? { ...row, variety: e.target.value } : row)
+                            }))}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                          >
+                            <option value="">Select variety</option>
+                            {inventoryData.map(v => (
+                              <option key={v.id} value={v.name}>{v.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div className="md:col-span-3">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Sack Size</label>
+                          <select
+                            value={item.sack_size_kg}
+                            onChange={(e) => setNewDelivery(prev => ({
+                              ...prev,
+                              items: prev.items.map((row, i) => i === idx ? { ...row, sack_size_kg: Number(e.target.value) as 25 | 50 } : row)
+                            }))}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                          >
+                            <option value={25}>25 kg</option>
+                            <option value={50}>50 kg</option>
+                          </select>
+                        </div>
+                        
+                        <div className="md:col-span-3">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Sacks</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.sacks}
+                            onChange={(e) => setNewDelivery(prev => ({
+                              ...prev,
+                              items: prev.items.map((row, i) => i === idx ? { ...row, sacks: Math.max(0, parseInt(e.target.value) || 0) } : row)
+                            }))}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                            placeholder="1"
+                          />
+                        </div>
+                        
+                        <div className="md:col-span-1">
+                          <button
+                            onClick={() => {
+                              if (newDelivery.items.length > 1) {
+                                setNewDelivery(prev => ({
+                                  ...prev,
+                                  items: prev.items.filter((_, i) => i !== idx)
+                                }));
+                              }
+                            }}
+                            disabled={newDelivery.items.length === 1}
+                            className="w-full px-3 py-2 text-sm bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-xs text-slate-600">
+                        Qty: <span className="font-semibold">{item.sacks * item.sack_size_kg} kg</span>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  <button
+                    onClick={() => {
+                      setNewDelivery(prev => ({
+                        ...prev,
+                        items: [...prev.items, { variety: '', sack_size_kg: 25, sacks: 1 }]
+                      }));
+                    }}
+                    className="w-full px-4 py-2 text-sm bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition font-medium"
+                  >
+                    + Add another item
+                  </button>
+                  
+                  <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                    <p className="text-sm text-slate-600">
+                      Total Quantity: <span className="font-semibold text-green-700">{newDelivery.items.reduce((sum, it) => sum + it.sacks * it.sack_size_kg, 0)} kg</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Notes</label>
+                  <textarea
+                    value={newDelivery.notes}
+                    onChange={(e) => setNewDelivery(prev => ({ ...prev, notes: e.target.value }))}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[100px]"
+                    placeholder="Additional delivery details..."
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Close main containers */}
     </div>
+  </div>
+  </div>
   );
 }
+

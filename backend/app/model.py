@@ -175,6 +175,35 @@ def create_tables():
                    )       
             """)
     
+    # delivery table
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS delivery(
+                   delivery_id SERIAL PRIMARY KEY,
+                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                   delivery_date DATE NOT NULL,
+                   recipient TEXT NOT NULL,
+                   destination TEXT NOT NULL,
+                   method TEXT NOT NULL CHECK (method IN ('delivery', 'pick-up')),
+                   status TEXT NOT NULL CHECK (status IN ('to be delivered', 'delivered', 'cancelled', 'returned')),
+                   notes TEXT,
+                   total_quantity_kg FLOAT,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )
+            """)
+    
+    # delivery items table (line items for each delivery)
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS delivery_item(
+                   item_id SERIAL PRIMARY KEY,
+                   delivery_id INTEGER REFERENCES delivery(delivery_id) ON DELETE CASCADE,
+                   variety TEXT NOT NULL,
+                   sack_size_kg INTEGER NOT NULL CHECK (sack_size_kg IN (25, 50)),
+                   sacks INTEGER NOT NULL,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )
+            """)
+    
     conn.commit()
     cursor.close()
     conn.close()

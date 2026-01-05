@@ -1,7 +1,11 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useState } from "react";
 import PlantingCalendar from "../components/PlantingCalendar";
 import BackButton from "../../../components/BackButton";
 import Link from "next/link";
+import { useParams } from "next/navigation";
+import { getCachedData } from "../../../lib/dataPreloader";
 
 /* Human-readable weather descriptions kept (no attribute removal) */
 const WEATHER_CODE_MAP: Record<number, string> = {
@@ -295,82 +299,13 @@ const WindIcon = ({ size = 30 }: { size?: number }) => (
   </svg>
 );
 
-export default async function FieldDetailPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default function FieldDetailPage() {
+  const params = useParams();
+  const fieldId = params.id as string;
 
-  let field: { id: string | number; name: string; location: string; area_ha: number } = {
-    id,
-    name: `Field ${id}`,
-    location: "14.5995,120.9842",
-    area_ha: 1.25,
-  };
-
-  try {
-    const res = await fetch(
-      `http://127.0.0.1:5001/api/fields?id=${encodeURIComponent(String(id))}`,
-      { cache: "no-store" }
-    );
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      let f = data.field ?? undefined;
-      if (!f && Array.isArray(data.fields)) {
-        f = data.fields.find((x: any) => String(x.id) === String(id));
-      }
-      if (f) {
-        field = {
-          id: f.id ?? id,
-          name: f.name ?? `Field ${id}`,
-          location: f.location ?? field.location,
-          area_ha: f.area_ha ?? field.area_ha,
-        };
-      }
-    }
-  } catch (err) {
-    // ignore network/backend unavailable
-  }
-
-  let cityName: string | null = null;
-  let latNum: number | null = null;
-  let lonNum: number | null = null;
-  if (field.location && typeof field.location === "string" && field.location.includes(",")) {
-    const [latS, lonS] = field.location.split(",").map((s) => s.trim());
-    const lat = parseFloat(latS);
-    const lon = parseFloat(lonS);
-    if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
-      latNum = lat;
-      lonNum = lon;
-    }
-  }
-
-  try {
-    if (latNum !== null && lonNum !== null) {
-      const gRes = await fetch(
-        `http://127.0.0.1:5001/api/reverse-geocode?lat=${encodeURIComponent(
-          String(latNum)
-        )}&lon=${encodeURIComponent(String(lonNum))}`,
-        { cache: "no-store" }
-      );
-      if (gRes.ok) {
-        const gData = await gRes.json().catch(() => ({}));
-        const parts: string[] = [];
-        if (gData.city) parts.push(gData.city);
-        if (gData.state) parts.push(gData.state);
-        cityName = parts.length > 0 ? parts.join(", ") : gData.display_name ?? null;
-      }
-    }
-  } catch (e) {
-    // ignore
-  }
-
-  const crop = {
-    name: "Jasmine Rice",
-    planting_date: "2025-10-01",
-    expected_harvest_date: "2026-02-15",
-    health_status: "Good",
-    notes: "No major pests detected. Apply balanced NPK at 45 days.",
-  };
-
-  let weather: any = {
+  const [field, setField] = useState<{ id: string | number; name: string; location: string; area_ha: number } | null>(null);
+  const [cityName, setCityName] = useState<string | null>(null);
+  const [weather, setWeather] = useState<any>({
     id: null,
     date: null,
     weather_code: null,
@@ -386,226 +321,353 @@ export default async function FieldDetailPage({ params }: { params: { id: string
     field_id: null,
     location: null,
     description: null,
-  };
+  });
+  const [crop] = useState({
+    name: "Jasmine Rice",
+    planting_date: "2025-10-01",
+    expected_harvest_date: "2026-02-15",
+    health_status: "Good",
+    notes: "No major pests detected. Apply balanced NPK at 45 days.",
+  });
+  const [isLoading, setIsLoading] = useState(true);
 
-  if (latNum !== null && lonNum !== null) {
-    try {
-      const wRes = await fetch("http://127.0.0.1:5001/api/fetch-weather", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat: latNum, lon: lonNum, field_id: Number(id) }),
-        cache: "no-store",
-      });
-      if (wRes.ok) {
-        const wData = await wRes.json().catch(() => ({}));
-        const w = wData.weather ?? {};
+  useEffect(() => {
+    const loadFieldData = async () => {
+      setIsLoading(true);
 
-        const rawTemp = w.temperature ?? null;
-        const rawRelHum = w.relative_humidity ?? null;
-        const rawPrecipProb = w.precipitation_probability ?? null;
-        const rawPrecip = w.precipitation ?? null;
-        const rawCloud = w.cloud_cover ?? null;
-        const rawWind = w.wind_speed_10m ?? null;
-        const rawWindDir = w.wind_direction_10m ?? null;
+      // Try to get field from cache first
+      console.log("🔍 Checking for cached field data for ID:", fieldId);
+      const cachedData = getCachedData();
+      let fieldData = null;
 
-        const tempC =
-          rawTemp != null
-            ? Number(rawTemp)
-            : w.temperature_c != null
-            ? Number(w.temperature_c)
-            : weather.temperature_c;
-        const relHum =
-          rawRelHum != null ? Number(rawRelHum) : w.humidity_percent != null ? Number(w.humidity_percent) : weather.relative_humidity;
-
-        let windKph = weather.wind_kph;
-        if (rawWind != null) {
-          const windNum = Number(rawWind);
-          if (!Number.isNaN(windNum)) {
-            windKph = windNum <= 60 ? +(windNum * 3.6).toFixed(1) : +windNum;
-          }
-        } else if (w.wind_kph != null) {
-          windKph = Number(w.wind_kph);
+      if (cachedData && Array.isArray(cachedData.fields)) {
+        console.log("📦 Found cached fields, searching for ID:", fieldId);
+        fieldData = cachedData.fields.find((f: any) => String(f.id) === String(fieldId));
+        if (fieldData) {
+          console.log("✅ Field found in cache:", fieldData);
         }
-
-        weather = {
-          id: w.id ?? weather.id,
-          date: w.date ?? weather.date,
-          weather_code: w.weather_code ?? weather.weather_code,
-          temperature: rawTemp != null ? Number(rawTemp) : w.temperature_c != null ? Number(w.temperature_c) : weather.temperature,
-          temperature_c: tempC,
-          relative_humidity: relHum,
-          precipitation_probability: rawPrecipProb != null ? Number(rawPrecipProb) : weather.precipitation_probability,
-          precipitation: rawPrecip != null ? Number(rawPrecip) : weather.precipitation,
-          cloud_cover: rawCloud != null ? Number(rawCloud) : weather.cloud_cover,
-          wind_speed_10m: rawWind != null ? Number(rawWind) : weather.wind_speed_10m,
-          wind_kph: windKph,
-          wind_direction_10m: rawWindDir != null ? Number(rawWindDir) : weather.wind_direction_10m,
-          field_id: w.field_id ?? weather.field_id,
-          location: w.location ?? weather.location,
-          description: w.description ?? describeWeatherCode(w.weather_code) ?? weather.description,
-        };
       }
-    } catch (e) {
-      // keep demo values on any error
-    }
-  }
+
+      // If not in cache, fetch from backend
+      if (!fieldData) {
+        console.log("❌ Field not in cache, fetching from backend...");
+        try {
+          const res = await fetch(
+            `http://127.0.0.1:5001/api/fields?id=${encodeURIComponent(String(fieldId))}`,
+            { cache: "no-store" }
+          );
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            let f = data.field ?? undefined;
+            if (!f && Array.isArray(data.fields)) {
+              f = data.fields.find((x: any) => String(x.id) === String(fieldId));
+            }
+            if (f) {
+              fieldData = f;
+              console.log("📡 Field fetched from backend:", fieldData);
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching field:", err);
+        }
+      }
+
+      // Set field with default fallback
+      const finalField = fieldData
+        ? {
+            id: fieldData.id ?? fieldId,
+            name: fieldData.name ?? `Field ${fieldId}`,
+            location: fieldData.location ?? "14.5995,120.9842",
+            area_ha: fieldData.area_ha ?? 1.25,
+          }
+        : {
+            id: fieldId,
+            name: `Field ${fieldId}`,
+            location: "14.5995,120.9842",
+            area_ha: 1.25,
+          };
+
+      setField(finalField);
+
+      // Parse location for geocoding
+      let latNum: number | null = null;
+      let lonNum: number | null = null;
+      if (finalField.location && typeof finalField.location === "string" && finalField.location.includes(",")) {
+        const [latS, lonS] = finalField.location.split(",").map((s) => s.trim());
+        const lat = parseFloat(latS);
+        const lon = parseFloat(lonS);
+        if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+          latNum = lat;
+          lonNum = lon;
+        }
+      }
+
+      // Reverse geocode to get city name
+      if (latNum !== null && lonNum !== null) {
+        try {
+          const gRes = await fetch(
+            `http://127.0.0.1:5001/api/reverse-geocode?lat=${encodeURIComponent(
+              String(latNum)
+            )}&lon=${encodeURIComponent(String(lonNum))}`,
+            { cache: "no-store" }
+          );
+          if (gRes.ok) {
+            const gData = await gRes.json().catch(() => ({}));
+            const parts: string[] = [];
+            if (gData.city) parts.push(gData.city);
+            if (gData.state) parts.push(gData.state);
+            const city = parts.length > 0 ? parts.join(", ") : gData.display_name ?? null;
+            setCityName(city);
+            console.log("🗺️ City name loaded:", city);
+          }
+        } catch (e) {
+          console.error("Error reverse geocoding:", e);
+        }
+      }
+
+      // Fetch weather data
+      if (latNum !== null && lonNum !== null) {
+        try {
+          const wRes = await fetch("http://127.0.0.1:5001/api/fetch-weather", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lat: latNum, lon: lonNum, field_id: Number(fieldId) }),
+            cache: "no-store",
+          });
+          if (wRes.ok) {
+            const wData = await wRes.json().catch(() => ({}));
+            const w = wData.weather ?? {};
+
+            const rawTemp = w.temperature ?? null;
+            const rawRelHum = w.relative_humidity ?? null;
+            const rawPrecipProb = w.precipitation_probability ?? null;
+            const rawPrecip = w.precipitation ?? null;
+            const rawCloud = w.cloud_cover ?? null;
+            const rawWind = w.wind_speed_10m ?? null;
+            const rawWindDir = w.wind_direction_10m ?? null;
+
+            const tempC =
+              rawTemp != null
+                ? Number(rawTemp)
+                : w.temperature_c != null
+                ? Number(w.temperature_c)
+                : null;
+            const relHum =
+              rawRelHum != null ? Number(rawRelHum) : w.humidity_percent != null ? Number(w.humidity_percent) : null;
+
+            let windKph = null;
+            if (rawWind != null) {
+              const windNum = Number(rawWind);
+              if (!Number.isNaN(windNum)) {
+                windKph = windNum <= 60 ? +(windNum * 3.6).toFixed(1) : +windNum;
+              }
+            } else if (w.wind_kph != null) {
+              windKph = Number(w.wind_kph);
+            }
+
+            const weatherData = {
+              id: w.id ?? null,
+              date: w.date ?? null,
+              weather_code: w.weather_code ?? null,
+              temperature: rawTemp != null ? Number(rawTemp) : w.temperature_c != null ? Number(w.temperature_c) : null,
+              temperature_c: tempC,
+              relative_humidity: relHum,
+              precipitation_probability: rawPrecipProb != null ? Number(rawPrecipProb) : null,
+              precipitation: rawPrecip != null ? Number(rawPrecip) : null,
+              cloud_cover: rawCloud != null ? Number(rawCloud) : null,
+              wind_speed_10m: rawWind != null ? Number(rawWind) : null,
+              wind_kph: windKph,
+              wind_direction_10m: rawWindDir != null ? Number(rawWindDir) : null,
+              field_id: w.field_id ?? null,
+              location: w.location ?? null,
+              description: w.description ?? describeWeatherCode(w.weather_code) ?? null,
+            };
+
+            setWeather(weatherData);
+            console.log("🌤️ Weather data loaded:", weatherData);
+          }
+        } catch (e) {
+          console.error("Error fetching weather:", e);
+        }
+      }
+
+      setIsLoading(false);
+    };
+
+    loadFieldData();
+  }, [fieldId]);
 
   return (
     <div className="min-h-screen bg-brand-hero p-6">
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 mb-6">
-          <div className="flex-1">
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-xl font-extrabold text-slate-900">{field.name}</h1>
-                <p className="text-sm text-slate-500">
-                  Field ID: <span className="font-medium text-slate-700">{field.id}</span>
-                </p>
-                <p className="mt-1 text-sm text-slate-600 hidden sm:block">{cityName ?? field.location}</p>
-              </div>
-
-              <div className="self-start">
-                <BackButton href="/fields" iconClassName="text-slate-900" />
-              </div>
+        {isLoading ? (
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <p className="mt-4 text-slate-600">Loading field details...</p>
             </div>
           </div>
-        </div>
+        ) : field ? (
+          <>
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div className="flex-1">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 flex items-start justify-between gap-4">
+                  <div>
+                    <h1 className="text-xl font-extrabold text-slate-900">{field.name}</h1>
+                    <p className="text-sm text-slate-500">
+                      Field ID: <span className="font-medium text-slate-700">{field.id}</span>
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600 hidden sm:block">{cityName ?? field.location}</p>
+                  </div>
 
-        {/* Main grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Weather card */}
-          <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-2 rounded-lg bg-slate-50">
-                <WeatherIcon code={weather.weather_code} size={56} />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">{weather.description ?? "No data"}</h3>
-                <p className="text-sm text-slate-500">{weather.date ?? "—"}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
-                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
-                  <TempIcon />
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Temp (°C)</div>
-                  <div className="text-lg font-medium">{weather.temperature_c ?? "—"}</div>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
-                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
-                  <HumidityIcon />
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Humidity</div>
-                  <div className="text-lg font-medium">{weather.relative_humidity ?? "—"}%</div>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
-                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
-                  <PrecipProbIcon />
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Precip Prob</div>
-                  <div className="text-lg font-medium">{weather.precipitation_probability ?? "—"}%</div>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
-                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
-                  <PrecipIcon />
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Precip (mm)</div>
-                  <div className="text-lg font-medium">{weather.precipitation ?? "—"}</div>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
-                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
-                  <CloudIcon />
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Cloud Cover</div>
-                  <div className="text-lg font-medium">{weather.cloud_cover ?? "—"}%</div>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
-                <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
-                  <WindIcon />
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Wind</div>
-                  <div className="text-lg font-medium">{weather.wind_kph ?? "—"} kph</div>
+                  <div className="self-start">
+                    <BackButton href="/fields" iconClassName="text-slate-900" />
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-4 border-t pt-3 text-xs text-slate-500">
-              <div><strong>Weather Code:</strong> {weather.weather_code ?? "—"}</div>
-              <div><strong>Wind Dir (10m):</strong> {weather.wind_direction_10m ?? "—"}°</div>
-              <div><strong>Field ID (weather):</strong> {weather.field_id ?? "—"}</div>
-              <div><strong>Location (weather):</strong> {weather.location ?? field.location ?? "—"}</div>
-              <div><strong>Raw Temp Value:</strong> {weather.temperature ?? "—"}</div>
-              <div className="mt-2 text-xs text-slate-400">All weather attributes are shown for diagnostics and kept intact.</div>
+            {/* Main grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Weather card */}
+              <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-2 rounded-lg bg-slate-50">
+                    <WeatherIcon code={weather.weather_code} size={56} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">{weather.description ?? "No data"}</h3>
+                    <p className="text-sm text-slate-500">{weather.date ?? "—"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                    <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                      <TempIcon />
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Temp (°C)</div>
+                      <div className="text-lg font-medium">{weather.temperature_c ?? "—"}</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                    <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                      <HumidityIcon />
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Humidity</div>
+                      <div className="text-lg font-medium">{weather.relative_humidity ?? "—"}%</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                    <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                      <PrecipProbIcon />
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Precip Prob</div>
+                      <div className="text-lg font-medium">{weather.precipitation_probability ?? "—"}%</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                    <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                      <PrecipIcon />
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Precip (mm)</div>
+                      <div className="text-lg font-medium">{weather.precipitation ?? "—"}</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                    <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                      <CloudIcon />
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Cloud Cover</div>
+                      <div className="text-lg font-medium">{weather.cloud_cover ?? "—"}%</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-lg flex items-center gap-3">
+                    <div className="w-9 h-9 flex items-center justify-center rounded-md bg-white">
+                      <WindIcon />
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Wind</div>
+                      <div className="text-lg font-medium">{weather.wind_kph ?? "—"} kph</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 border-t pt-3 text-xs text-slate-500">
+                  <div><strong>Weather Code:</strong> {weather.weather_code ?? "—"}</div>
+                  <div><strong>Wind Dir (10m):</strong> {weather.wind_direction_10m ?? "—"}°</div>
+                  <div><strong>Field ID (weather):</strong> {weather.field_id ?? "—"}</div>
+                  <div><strong>Location (weather):</strong> {weather.location ?? field.location ?? "—"}</div>
+                  <div><strong>Raw Temp Value:</strong> {weather.temperature ?? "—"}</div>
+                  <div className="mt-2 text-xs text-slate-400">All weather attributes are shown for diagnostics and kept intact.</div>
+                </div>
+              </div>
+
+              {/* Crop details & planting calendar */}
+              <div className="lg:col-span-2 space-y-6">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h2 className="text-xl font-semibold text-slate-900">{crop.name}</h2>
+                      <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date}</span></p>
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      <div className="mb-1"><strong>Status:</strong> <span className="font-medium">{crop.health_status}</span></div>
+                      <div><strong>Area:</strong> <span className="font-medium">{field.area_ha} ha</span></div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 text-sm text-slate-600">
+                    <h4 className="font-medium mb-1">Notes</h4>
+                    <p className="leading-relaxed">{crop.notes}</p>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                  <h3 className="text-lg font-semibold mb-4">Planting & Harvest Calendar</h3>
+                  <PlantingCalendar
+                    fieldId={field.id}
+                    initialPlantingDate={crop.planting_date}
+                    initialHarvestDate={crop.expected_harvest_date}
+                  />
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                  <h3 className="text-lg font-semibold mb-3">Field Summary</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div className="p-3 bg-slate-50 rounded-lg">
+                      <div className="text-xs text-slate-500">Area</div>
+                      <div className="text-lg font-medium">{field.area_ha} ha</div>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-lg">
+                      <div className="text-xs text-slate-500">Location</div>
+                      <div className="text-lg font-medium">{field.location}</div>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-lg">
+                      <div className="text-xs text-slate-500">City</div>
+                      <div className="text-lg font-medium">{cityName ?? "—"}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
+          </>
+        ) : (
+          <div className="text-center py-12">
+            <p className="text-slate-600">Failed to load field details. Please try again.</p>
           </div>
-
-          {/* Crop details & planting calendar */}
-          <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-slate-900">{crop.name}</h2>
-                  <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date}</span></p>
-                </div>
-                <div className="text-sm text-slate-500">
-                  <div className="mb-1"><strong>Status:</strong> <span className="font-medium">{crop.health_status}</span></div>
-                  <div><strong>Area:</strong> <span className="font-medium">{field.area_ha} ha</span></div>
-                </div>
-              </div>
-
-              <div className="mt-4 text-sm text-slate-600">
-                <h4 className="font-medium mb-1">Notes</h4>
-                <p className="leading-relaxed">{crop.notes}</p>
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
-              <h3 className="text-lg font-semibold mb-4">Planting & Harvest Calendar</h3>
-              <PlantingCalendar
-                fieldId={field.id}
-                initialPlantingDate={crop.planting_date}
-                initialHarvestDate={crop.expected_harvest_date}
-              />
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
-              <h3 className="text-lg font-semibold mb-3">Field Summary</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                <div className="p-3 bg-slate-50 rounded-lg">
-                  <div className="text-xs text-slate-500">Area</div>
-                  <div className="text-lg font-medium">{field.area_ha} ha</div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-lg">
-                  <div className="text-xs text-slate-500">Location</div>
-                  <div className="text-lg font-medium">{field.location}</div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-lg">
-                  <div className="text-xs text-slate-500">City</div>
-                  <div className="text-lg font-medium">{cityName ?? "—"}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
       </div> 
     </div>
   );

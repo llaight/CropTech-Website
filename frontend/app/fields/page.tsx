@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from 'next/navigation';
 import dynamic from "next/dynamic";
+import { getCachedData } from "../lib/dataPreloader";
 
 const LeafletMap = dynamic(() => import("./components/LeafletMap"), {
   ssr: false,
@@ -48,26 +49,50 @@ export default function LandTrackerPage() {
   }, []);
   const router = useRouter();
 
-  // Load saved fields (and crops) from backend for this user
+  // Load saved fields from backend for this user
   useEffect(() => {
-    if (!userId && !localStorage.getItem('token')) return;
-
     (async () => {
       try {
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-        const headers: any = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-
-        // Fetch fields for user (if userId present, filter by it)
-        let fieldsUrl = 'http://localhost:5001/api/fields';
-        if (userId) fieldsUrl += `?user_id=${userId}`;
-        const fRes = await fetch(fieldsUrl, { headers });
-        if (!fRes.ok) {
-          console.warn('Failed to load fields', await fRes.text());
+        if (!token) {
+          console.log('No token found, skipping fields load');
           return;
         }
-        const fData = await fRes.json().catch(() => ({}));
-        const fetchedFields = (fData.fields || []).map((f: any) => {
+
+        const headers: any = { 'Content-Type': 'application/json' };
+        headers['Authorization'] = `Bearer ${token}`;
+
+        console.log('🔍 Checking for cached fields data...');
+        // Try to load from cache first
+        const cachedData = getCachedData();
+        let fieldsData = cachedData?.fields || [];
+        let fromCache = false;
+
+        if (fieldsData && Array.isArray(fieldsData) && fieldsData.length > 0) {
+          console.log('✅ Loaded fields from cache:', fieldsData.length, 'items');
+          fromCache = true;
+        } else {
+          // If no cached data, fetch from backend
+          console.log('📥 No cache found, fetching fields from backend...');
+          let fieldsUrl = 'http://localhost:5001/api/fields';
+          if (userId) fieldsUrl += `?user_id=${userId}`;
+          
+          const fRes = await fetch(fieldsUrl, { headers });
+          if (!fRes.ok) {
+            console.warn('Failed to load fields', await fRes.text());
+            return;
+          }
+          const fData = await fRes.json().catch(() => ({}));
+          fieldsData = fData.fields || [];
+          console.log('📥 Loaded fields from backend:', fieldsData.length, 'items');
+        }
+
+        if (!fieldsData || !Array.isArray(fieldsData)) {
+          console.warn('Invalid fields data received:', fieldsData);
+          return;
+        }
+
+        const fetchedFields = fieldsData.map((f: any) => {
           let center: [number, number] = [0, 0];
           try {
             if (f.location && typeof f.location === 'string' && f.location.includes(',')) {
@@ -76,63 +101,47 @@ export default function LandTrackerPage() {
               const lng = parseFloat(lngS);
               if (!Number.isNaN(lat) && !Number.isNaN(lng)) center = [lat, lng];
             }
-          } catch (e) {}
+          } catch (e) {
+            console.error('Error parsing location:', e);
+          }
 
           return {
             id: f.id,
             name: f.name || `Field ${f.id}`,
-            crop: '',
+            crop: f.name || '', // Backend now returns crop name directly
             coordinates: [],
             center,
           } as FieldData;
         });
 
-        // Fetch crops for this user and map to fields by field_id
-        let cropsUrl = 'http://localhost:5001/api/crops';
-        if (userId) cropsUrl += `?user_id=${userId}`;
-        const cRes = await fetch(cropsUrl, { headers });
-        if (cRes.ok) {
-          const cData = await cRes.json().catch(() => ({}));
-          const crops = cData.crops || [];
-          const cropByField: Record<string, string> = {};
-          for (const c of crops) {
-            if (c.field_id) {
-              // store first crop name per field
-              if (!cropByField[c.field_id]) cropByField[c.field_id] = c.name || '';
-            }
-          }
-
-          // attach crop names
-          for (const ff of fetchedFields) {
-            if (cropByField[ff.id]) ff.crop = cropByField[ff.id];
-          }
-        }
-
         // Reverse-geocode each field's center to obtain city and state.
-        // Do this sequentially to avoid hammering the Nominatim service.
-        for (let i = 0; i < fetchedFields.length; i++) {
-          const ff = fetchedFields[i];
-          try {
-            const [lat, lon] = ff.center;
-            if (lat !== 0 || lon !== 0) {
-              const r = await fetch(`http://localhost:5001/api/reverse-geocode?lat=${lat}&lon=${lon}`);
-              if (r.ok) {
-                const j = await r.json().catch(() => ({}));
-                ff.city = j.city || null;
-                ff.state = j.state || null;
+        // Only do this if we're fetching fresh data (not from cache)
+        if (!fromCache) {
+          for (let i = 0; i < fetchedFields.length; i++) {
+            const ff = fetchedFields[i];
+            try {
+              const [lat, lon] = ff.center;
+              if (lat !== 0 || lon !== 0) {
+                const r = await fetch(`http://localhost:5001/api/reverse-geocode?lat=${lat}&lon=${lon}`);
+                if (r.ok) {
+                  const j = await r.json().catch(() => ({}));
+                  ff.city = j.city || null;
+                  ff.state = j.state || null;
+                }
               }
+            } catch (e) {
+              // ignore per-field reverse geocode errors
+              ff.city = null;
+              ff.state = null;
             }
-          } catch (e) {
-            // ignore per-field reverse geocode errors
-            ff.city = null;
-            ff.state = null;
           }
         }
 
         // update UI
-        if (fetchedFields.length > 0) setFields(fetchedFields as FieldData[]);
+        console.log('Setting fields:', fetchedFields.length, 'fields to display');
+        setFields(fetchedFields as FieldData[]);
       } catch (err) {
-        console.warn('Error loading saved fields:', err);
+        console.error('Error loading saved fields:', err);
       }
     })();
   }, [userId]);

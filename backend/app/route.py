@@ -740,15 +740,40 @@ def list_fields():
 
     cursor = conn.cursor()
     try:
+        # Use LEFT JOIN to get the first crop name for each field in one query
         if q_user:
-            cursor.execute("SELECT field_id, location, user_id FROM fields WHERE user_id=%s;", (q_user,))
+            cursor.execute("""
+                SELECT f.field_id, f.location, f.user_id, c.name
+                FROM fields f
+                LEFT JOIN (
+                    SELECT DISTINCT ON (field_id) field_id, name 
+                    FROM crops 
+                    ORDER BY field_id, crop_id
+                ) c ON f.field_id = c.field_id
+                WHERE f.user_id=%s
+                ORDER BY f.field_id;
+            """, (q_user,))
         else:
-            cursor.execute("SELECT field_id, location, user_id FROM fields;")
+            cursor.execute("""
+                SELECT f.field_id, f.location, f.user_id, c.name
+                FROM fields f
+                LEFT JOIN (
+                    SELECT DISTINCT ON (field_id) field_id, name 
+                    FROM crops 
+                    ORDER BY field_id, crop_id
+                ) c ON f.field_id = c.field_id
+                ORDER BY f.field_id;
+            """)
         rows = cursor.fetchall()
         fields = []
         for row in rows:
-            fid, location, uid = row
-            fields.append({"id": fid, "location": location, "user_id": uid})
+            fid, location, uid, crop_name = row
+            fields.append({
+                "id": fid, 
+                "location": location, 
+                "user_id": uid,
+                "name": crop_name or f"Field {fid}"
+            })
     except Exception as e:
         conn.rollback()
         cursor.close()
@@ -1053,3 +1078,340 @@ def fetch_weather_for_location():
             "location": f"{lat_f},{lon_f}",
         }
     }), 201
+
+
+# -------------------------
+# Delivery endpoints
+# -------------------------
+@bp.route("/deliveries", methods=["POST"])
+def create_delivery():
+    """Create a new delivery record with line items."""
+    # Get user from token
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    data = request.get_json() or {}
+    
+    # Validate required fields
+    delivery_date = data.get("delivery_date")
+    recipient = data.get("recipient")
+    destination = data.get("destination")
+    method = data.get("method", "delivery")
+    status = data.get("status", "to be delivered")
+    notes = data.get("notes", "")
+    items = data.get("items", [])
+    
+    if not delivery_date or not recipient or not destination:
+        return jsonify({"message": "delivery_date, recipient, and destination are required"}), 400
+    
+    if not items or len(items) == 0:
+        return jsonify({"message": "At least one delivery item is required"}), 400
+    
+    # Validate all items
+    total_qty = 0
+    for item in items:
+        if not item.get("variety") or item.get("sacks", 0) <= 0:
+            return jsonify({"message": "Each item must have a variety and positive sacks"}), 400
+        sack_size = item.get("sack_size_kg", 50)
+        sacks = item.get("sacks", 0)
+        total_qty += sack_size * sacks
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # Insert delivery header
+        cursor.execute("""
+            INSERT INTO delivery (user_id, delivery_date, recipient, destination, method, status, notes, total_quantity_kg)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING delivery_id;
+        """, (user_id, delivery_date, recipient, destination, method, status, notes, total_qty))
+        
+        row = cursor.fetchone()
+        delivery_id = row[0] if row else None
+        
+        if not delivery_id:
+            conn.rollback()
+            return jsonify({"message": "Failed to create delivery"}), 500
+        
+        # Insert delivery items
+        for item in items:
+            cursor.execute("""
+                INSERT INTO delivery_item (delivery_id, variety, sack_size_kg, sacks)
+                VALUES (%s, %s, %s, %s);
+            """, (delivery_id, item.get("variety"), item.get("sack_size_kg"), item.get("sacks")))
+        
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error creating delivery", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        "message": "Delivery created successfully",
+        "delivery_id": delivery_id
+    }), 201
+
+
+@bp.route("/deliveries", methods=["GET"])
+def list_deliveries():
+    """Get deliveries for the authenticated user."""
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # Fetch all deliveries and their items in a single JOIN query
+        cursor.execute("""
+            SELECT d.delivery_id, d.delivery_date, d.recipient, d.destination, 
+                   d.method, d.status, d.notes, d.total_quantity_kg, d.created_at,
+                   di.variety, di.sack_size_kg, di.sacks
+            FROM delivery d
+            LEFT JOIN delivery_item di ON d.delivery_id = di.delivery_id
+            WHERE d.user_id = %s
+            ORDER BY d.delivery_date DESC, d.delivery_id;
+        """, (user_id,))
+        
+        rows = cursor.fetchall()
+        deliveries_dict = {}
+        
+        # Aggregate items per delivery
+        for row in rows:
+            delivery_id = row[0]
+            delivery_date = row[1]
+            recipient = row[2]
+            destination = row[3]
+            method = row[4]
+            status = row[5]
+            notes = row[6]
+            total_qty = row[7]
+            created_at = row[8]
+            variety = row[9]
+            sack_size_kg = row[10]
+            sacks = row[11]
+            
+            if delivery_id not in deliveries_dict:
+                try:
+                    delivery_date_iso = delivery_date.isoformat() if hasattr(delivery_date, 'isoformat') else str(delivery_date)
+                    created_at_iso = created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at)
+                except Exception:
+                    delivery_date_iso = str(delivery_date)
+                    created_at_iso = str(created_at)
+                
+                deliveries_dict[delivery_id] = {
+                    "id": delivery_id,
+                    "delivery_date": delivery_date_iso,
+                    "recipient": recipient,
+                    "destination": destination,
+                    "method": method,
+                    "status": status,
+                    "notes": notes,
+                    "total_quantity_kg": total_qty,
+                    "items": [],
+                    "created_at": created_at_iso
+                }
+            
+            # Add item if it exists
+            if variety is not None:
+                deliveries_dict[delivery_id]["items"].append({
+                    "variety": variety,
+                    "sack_size_kg": sack_size_kg,
+                    "sacks": sacks
+                })
+        
+        deliveries = list(deliveries_dict.values())
+        
+    except Exception as e:
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching deliveries", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    
+    return jsonify({"deliveries": deliveries}), 200
+
+
+@bp.route("/deliveries/<int:delivery_id>", methods=["PUT"])
+def update_delivery(delivery_id):
+    """Update a delivery record."""
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    data = request.get_json() or {}
+    
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # Check if delivery belongs to user
+        cursor.execute("SELECT user_id FROM delivery WHERE delivery_id = %s", (delivery_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Delivery not found"}), 404
+        
+        if row[0] != user_id:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Unauthorized"}), 403
+        
+        # Update delivery header fields
+        updates = []
+        values = []
+        
+        if "delivery_date" in data:
+            updates.append("delivery_date = %s")
+            values.append(data["delivery_date"])
+        
+        if "recipient" in data:
+            updates.append("recipient = %s")
+            values.append(data["recipient"])
+        
+        if "destination" in data:
+            updates.append("destination = %s")
+            values.append(data["destination"])
+        
+        if "method" in data:
+            updates.append("method = %s")
+            values.append(data["method"])
+        
+        if "status" in data:
+            updates.append("status = %s")
+            values.append(data["status"])
+        
+        if "notes" in data:
+            updates.append("notes = %s")
+            values.append(data["notes"])
+        
+        # Update items if provided
+        if "items" in data:
+            items = data["items"]
+            
+            # Recalculate total
+            total_qty = 0
+            for item in items:
+                total_qty += item.get("sack_size_kg", 50) * item.get("sacks", 0)
+            
+            updates.append("total_quantity_kg = %s")
+            values.append(total_qty)
+            
+            # Delete old items
+            cursor.execute("DELETE FROM delivery_item WHERE delivery_id = %s", (delivery_id,))
+            
+            # Insert new items
+            for item in items:
+                cursor.execute("""
+                    INSERT INTO delivery_item (delivery_id, variety, sack_size_kg, sacks)
+                    VALUES (%s, %s, %s, %s);
+                """, (delivery_id, item.get("variety"), item.get("sack_size_kg"), item.get("sacks")))
+        
+        # Execute update if there are any updates
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(delivery_id)
+            
+            query = f"UPDATE delivery SET {', '.join(updates)} WHERE delivery_id = %s;"
+            cursor.execute(query, values)
+        
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error updating delivery", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    
+    return jsonify({"message": "Delivery updated successfully"}), 200
+
+
+@bp.route("/deliveries/<int:delivery_id>", methods=["DELETE"])
+def delete_delivery(delivery_id):
+    """Delete a delivery record."""
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # Check if delivery belongs to user
+        cursor.execute("SELECT user_id FROM delivery WHERE delivery_id = %s", (delivery_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Delivery not found"}), 404
+        
+        if row[0] != user_id:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Unauthorized"}), 403
+        
+        # Delete delivery (items will cascade delete)
+        cursor.execute("DELETE FROM delivery WHERE delivery_id = %s", (delivery_id,))
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error deleting delivery", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    
+    return jsonify({"message": "Delivery deleted successfully"}), 200

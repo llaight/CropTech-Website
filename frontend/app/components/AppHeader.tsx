@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import ThemeToggle from "./ThemeToogle";
+import { clearCachedData } from "../lib/dataPreloader";
 
 type User = { name?: string; role?: string } | null;
 
@@ -23,6 +24,7 @@ export default function AppHeader() {
   const handleSignOut = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    clearCachedData(); // Clear preloaded data cache
     window.dispatchEvent(new Event("auth:changed"));
     router.replace("/"); // go back to landing
   };

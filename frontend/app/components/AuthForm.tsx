@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "./ThemeProvider";
+import { prefetchUserData } from "../lib/dataPreloader";
 
 type Props = {
   mode: "login" | "signup";
@@ -55,6 +56,11 @@ export default function AuthForm({ mode }: Props) {
         const token = data.token || data?.token;
         if (token) {
           localStorage.setItem("token", token);
+          
+          // Prefetch inventory and deliveries data in the background
+          prefetchUserData(token).catch(err => 
+            console.error('Background data prefetch failed:', err)
+          );
         }
         if (data.user) localStorage.setItem("user", JSON.stringify(data.user));
 
