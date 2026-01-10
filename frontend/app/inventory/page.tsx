@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getCachedData } from "../lib/dataPreloader";
+import { formatLongDate } from "../lib/utils";
 
 // Define interfaces
 interface InventoryItem {
@@ -48,12 +49,14 @@ interface DeliveryLineItem {
   variety: string;
   sack_size_kg: 25 | 50;
   sacks: number;
+  price?: number; // Price per kg
 }
 
 // Delivery record interface
 interface DeliveryRecord {
   id: number;
   delivery_date: string; // ISO date string
+  delivery_time: string; // HH:MM:SS format
   recipient: string;
   destination: string;
   method: 'delivery' | 'pick-up';
@@ -281,8 +284,26 @@ export default function InventoryPage() {
   const [deliveryTab, setDeliveryTab] = useState<'upcoming' | 'completed' | 'returned_cancelled'>('upcoming');
   const [activeTab, setActiveTab] = useState<'inventory' | 'deliveries'>('inventory');
   const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
+  // Helper function to get current local date in YYYY-MM-DD format
+  const getLocalDate = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper function to get current local time in HH:MM format
+  const getLocalTime = () => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+
   const [newDelivery, setNewDelivery] = useState<{
     delivery_date: string;
+    delivery_time: string;
     recipient: string;
     destination: string;
     method: 'delivery' | 'pick-up';
@@ -290,7 +311,8 @@ export default function InventoryPage() {
     items: DeliveryLineItem[];
     notes: string;
   }>({
-    delivery_date: new Date().toISOString().slice(0, 10),
+    delivery_date: getLocalDate(),
+    delivery_time: getLocalTime(),
     recipient: '',
     destination: '',
     method: 'delivery',
@@ -349,7 +371,7 @@ export default function InventoryPage() {
         // Use preloaded deliveries data if available
         if (cachedData.deliveries && Array.isArray(cachedData.deliveries)) {
           setDeliveries(cachedData.deliveries);
-          console.log("✅ Loaded deliveries from preloaded cache:", cachedData.deliveries.length, "items");
+          console.log("Loaded deliveries from preloaded cache:", cachedData.deliveries.length, "items");
           deliveriesLoaded_local = true;
           setDeliveriesLoaded(true); // Mark as loaded in state
         }
@@ -435,12 +457,26 @@ export default function InventoryPage() {
   // Load deliveries from backend only when user navigates to deliveries tab
   // Skip if already loaded from cache or localStorage
   useEffect(() => {
+    console.log('DeliveriesTab useEffect - activeTab:', activeTab, 'deliveriesLoaded:', deliveriesLoaded, 'hasUserToken:', !!user?.token, 'deliveriesCount:', deliveries.length);
+    
     if (activeTab === 'deliveries' && !deliveriesLoaded && user?.token) {
+      console.log('Condition met - proceeding with delivery load/auto-complete');
       // Check if we have data - if not, fetch from backend
       if (deliveries.length === 0) {
-        loadDeliveriesFromBackend();
+        console.log('No deliveries in state - fetching from backend');
+        loadDeliveriesFromBackend().then(() => {
+          setDeliveriesLoaded(true);
+        });
+      } else {
+        // Data from cache - run auto-complete immediately
+        console.log('Running auto-complete on cached deliveries:', deliveries.length);
+        autoCompleteDueDeliveries(deliveries);
+        setDeliveriesLoaded(true);
       }
-      setDeliveriesLoaded(true);
+    } else if (activeTab === 'deliveries' && deliveries.length > 0 && deliveriesLoaded) {
+      // Already loaded, but run auto-complete on tab switch
+      console.log('Tab switched to deliveries with loaded data, running auto-complete');
+      autoCompleteDueDeliveries(deliveries);
     }
   }, [activeTab, user?.token, deliveriesLoaded]);
 
@@ -519,8 +555,11 @@ export default function InventoryPage() {
 
       const data = await res.json();
       if (data.deliveries && Array.isArray(data.deliveries)) {
-        setDeliveries(data.deliveries);
         console.log('Loaded deliveries from backend:', data.deliveries.length, 'items');
+        // Set deliveries first
+        setDeliveries(data.deliveries);
+        // Then run auto-complete
+        console.log('Running auto-complete check on', data.deliveries.length, 'deliveries');
         await autoCompleteDueDeliveries(data.deliveries);
       }
     } catch (e) {
@@ -555,10 +594,34 @@ export default function InventoryPage() {
 
   // Auto-complete: mark due deliveries as delivered
   const autoCompleteDueDeliveries = async (list: DeliveryRecord[]) => {
-    const today = new Date().toISOString().slice(0, 10);
-    const toComplete = list.filter(d =>
-      d.status === 'to be delivered' && d.delivery_date.slice(0, 10) <= today
-    );
+    // Use local date instead of UTC to avoid timezone issues
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const today = `${year}-${month}-${day}`;
+    
+    const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':' + now.getSeconds().toString().padStart(2, '0');
+    
+    console.log('Auto-complete check - Today:', today, 'Current time:', currentTime);
+    
+    const toComplete = list.filter(d => {
+      if (d.status !== 'to be delivered') return false;
+      
+      const deliveryDate = d.delivery_date.slice(0, 10);
+      const deliveryTime = (d.delivery_time || '09:00:00').slice(0, 8); // Get HH:MM:SS format
+      
+      const isDue = deliveryDate < today || (deliveryDate === today && deliveryTime <= currentTime);
+      
+      if (isDue) {
+        console.log('Found due delivery:', d.id, 'Date:', deliveryDate, 'Time:', deliveryTime, 'Recipient:', d.recipient);
+      }
+      
+      return isDue;
+    });
+    
+    console.log('Deliveries due for completion:', toComplete.length);
+    
     if (toComplete.length === 0) return;
     try {
       await Promise.all(toComplete.map(d => updateDeliveryStatus(d.id, 'delivered')));
@@ -572,6 +635,7 @@ export default function InventoryPage() {
         if (res.ok) {
           const refreshed = await res.json();
           if (refreshed.deliveries && Array.isArray(refreshed.deliveries)) {
+            console.log('Refreshed deliveries after auto-complete');
             setDeliveries(refreshed.deliveries);
           }
         }
@@ -581,12 +645,38 @@ export default function InventoryPage() {
     }
   };
 
+  // Calculate total price for a delivery
+  const calculateDeliveryPrice = (delivery: DeliveryRecord): number => {
+    return delivery.items.reduce((total, item) => {
+      const inventoryItem = inventoryData.find(inv => inv.name === item.variety);
+      const pricePerKg = inventoryItem?.price || 0;
+      const totalKg = item.sacks * item.sack_size_kg;
+      return total + (pricePerKg * totalKg);
+    }, 0);
+  };
+
+  // Format price with thousands separator and 2 decimal places
+  const formatPrice = (price: number): string => {
+    return price.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
   // Update localStorage whenever inventoryData changes
   useEffect(() => {
     if (!isLoading) {
       saveToLocalStorage(inventoryData);
     }
   }, [inventoryData, isLoading]);
+
+  // Periodically check and auto-complete due deliveries
+  useEffect(() => {
+    if (activeTab !== 'deliveries' || deliveries.length === 0) return;
+
+    const interval = setInterval(() => {
+      autoCompleteDueDeliveries(deliveries);
+    }, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+  }, [deliveries, activeTab]);
 
   const handleInventoryClick = (item: InventoryItem) => {
     // Convert to editable format
@@ -641,7 +731,8 @@ export default function InventoryPage() {
   const handleCloseDeliveryModal = () => {
     setIsDeliveryModalOpen(false);
     setNewDelivery({
-      delivery_date: new Date().toISOString().slice(0, 10),
+      delivery_date: getLocalDate(),
+      delivery_time: getLocalTime(),
       recipient: '',
       destination: '',
       method: 'delivery',
@@ -1073,7 +1164,7 @@ export default function InventoryPage() {
         </div>
         
         <div class="date">
-          Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}
+          Generated on: ${formatLongDate(new Date())} ${new Date().toLocaleTimeString()}
         </div>
         
         <div class="summary">
@@ -1180,7 +1271,7 @@ export default function InventoryPage() {
         </table>
         
         <div class="footer">
-          <p>Rice Inventory Management System | Generated on ${new Date().toLocaleDateString()}</p>
+          <p>Rice Inventory Management System | Generated on ${formatLongDate(new Date())}</p>
           <p><em>Note: Items marked as "to dispose" are excluded from total value calculation</em></p>
           <p class="no-print">Click Ctrl+P to print or save as PDF</p>
         </div>
@@ -1364,7 +1455,7 @@ export default function InventoryPage() {
                                   {item.name}
                                 </h3>
                                 <span className="px-2.5 py-1 text-xs bg-green-100 text-green-700 rounded-md font-semibold flex-shrink-0">
-                                  ₱ {item.price.toFixed(2)}/kg
+                                  ₱ {formatPrice(item.price)}/kg
                                 </span>
                               </div>
                               <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -1533,277 +1624,33 @@ export default function InventoryPage() {
                   </div>
                 </div>
               ) : (
-                // Show deliveries list
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  <div className="px-6 py-5 flex items-center justify-between mb-0 border-b border-slate-200/60">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
-                        <svg className="w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="1" y="3" width="15" height="13"></rect>
-                          <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
-                          <circle cx="5.5" cy="18.5" r="2.5"></circle>
-                          <circle cx="18.5" cy="18.5" r="2.5"></circle>
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-slate-900 font-bold text-lg leading-tight">Deliveries</p>
-                        <p className="text-xs text-slate-500 mt-0.5 leading-tight">Track all shipments</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setIsDeliveryModalOpen(true)}
-                      className="px-3 py-2 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition flex items-center gap-1.5"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      Add Delivery
-                    </button>
+                <div className="flex flex-col items-center justify-center h-full px-6 py-12">
+                  <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mb-6">
+                    <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                    </svg>
                   </div>
-
-                  {deliveries.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full px-6 py-12">
-                      <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mb-6">
-                        <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-                        </svg>
-                      </div>
-                      <p className="text-slate-700 font-semibold text-lg">No deliveries yet</p>
-                      <p className="text-sm text-slate-500 mt-2 text-center px-6">Create a delivery record to start tracking shipments</p>
-                      <button
-                        onClick={() => setIsDeliveryModalOpen(true)}
-                        className="mt-6 px-6 py-3 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition"
-                      >
-                        Create First Delivery
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex-1 overflow-y-auto px-6 pb-6">
-                      {(() => {
-                        const upcomingList = deliveries
-                          .filter(d => d.status === 'to be delivered')
-                          .sort((a, b) => a.delivery_date.localeCompare(b.delivery_date));
-                        const completedList = deliveries
-                          .filter(d => d.status === 'delivered')
-                          .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
-                        const returnedCancelledList = deliveries
-                          .filter(d => d.status === 'returned' || d.status === 'cancelled')
-                          .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
-
-                        const tabBtn = (key: 'upcoming' | 'completed' | 'returned_cancelled', label: string, count: number) => (
-                          <button
-                            onClick={() => setDeliveryTab(key)}
-                            className={`${deliveryTab === key ? 'bg-white text-slate-900 shadow' : 'text-slate-600 hover:text-slate-800'} px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5`}
-                          >
-                            <span>{label}</span>
-                            <span className={`${deliveryTab === key ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'} px-1.5 py-0.5 rounded text-[10px] font-bold`}>{count}</span>
-                          </button>
-                        );
-
-                        return (
-                          <div className="space-y-5">
-                            <div className="flex items-center justify-between">
-                              <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1">
-                                {tabBtn('upcoming', 'Upcoming', upcomingList.length)}
-                                {tabBtn('completed', 'Completed', completedList.length)}
-                                {tabBtn('returned_cancelled', 'Returned/Cancelled', returnedCancelledList.length)}
-                              </div>
-                            </div>
-
-                            {/* Tab Content */}
-                            {deliveryTab === 'upcoming' && (
-                              <div className="space-y-4">
-                                {upcomingList.length === 0 ? (
-                                  <p className="text-sm text-slate-500">No upcoming deliveries.</p>
-                                ) : (
-                                  upcomingList.map(delivery => {
-                                    const statusConfig = {
-                                      'to be delivered': { bg: 'bg-blue-100', text: 'text-blue-700' },
-                                    };
-                                    const methodConfig = {
-                                      'delivery': { bg: 'bg-indigo-100', text: 'text-indigo-700' },
-                                      'pick-up': { bg: 'bg-amber-100', text: 'text-amber-700' },
-                                    };
-                                    const statusConf = statusConfig['to be delivered'];
-                                    const methodConf = methodConfig[delivery.method as keyof typeof methodConfig];
-
-                                    return (
-                                      <div key={delivery.id} className="p-5 bg-gradient-to-br from-blue-50 to-blue-50/50 rounded-xl border border-blue-200/60 hover:border-blue-300 hover:shadow-md transition-all duration-200 cursor-pointer group">
-                                        <div className="flex justify-between items-start gap-4 mb-4">
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1">
-                                              <p className="font-bold text-slate-900 text-base truncate group-hover:text-blue-700 transition">{delivery.recipient}</p>
-                                              <span className="text-xs font-semibold text-blue-600 bg-blue-200/50 px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0">#{delivery.id}</span>
-                                            </div>
-                                            <p className="text-xs text-slate-500 mt-2">{new Date(delivery.delivery_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                                          </div>
-                                          <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
-                                            <span className={`${methodConf.bg} ${methodConf.text} px-3 py-1.5 text-xs rounded-md font-semibold whitespace-nowrap`}>
-                                              {delivery.method === 'delivery' ? 'Delivery' : 'Pick-up'}
-                                            </span>
-                                            <span className={`${statusConf.bg} ${statusConf.text} px-3 py-1.5 text-xs rounded-md font-semibold whitespace-nowrap`}>
-                                              To be delivered
-                                            </span>
-                                          </div>
-                                        </div>
-                                        <div className="mb-4 pt-4 border-t border-blue-100">
-                                          <p className="text-sm text-slate-600 mb-3">{delivery.destination}</p>
-                                          <div className="space-y-2.5">
-                                            {delivery.items.map((it, i) => (
-                                              <div key={i} className="flex justify-between items-center text-sm">
-                                                <span className="text-slate-700 font-medium">{it.variety}</span>
-                                                <span className="text-slate-600 bg-white/70 px-3 py-1 rounded text-xs font-medium">{it.sacks} × {it.sack_size_kg}kg</span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                        <div className="flex items-center justify-between pt-3 border-t border-blue-100">
-                                          <span className="text-sm text-slate-500">Total Weight</span>
-                                          <div className="flex items-center gap-3">
-                                            <label className="text-xs text-slate-500 hidden sm:block">Change status:</label>
-                                            <select
-                                              defaultValue=""
-                                              onChange={async (e) => {
-                                                const v = e.target.value as 'delivered' | 'cancelled' | '';
-                                                if (!v) return;
-                                                const ok = await updateDeliveryStatus(delivery.id, v);
-                                                if (ok) {
-                                                  await loadDeliveriesFromBackend();
-                                                }
-                                              }}
-                                              className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-700"
-                                            >
-                                              <option value="" disabled>To be delivered</option>
-                                              <option value="delivered">Delivered</option>
-                                              <option value="cancelled">Cancelled</option>
-                                            </select>
-                                            <span className="text-base font-bold text-blue-700">{delivery.total_quantity_kg} kg</span>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            )}
-
-                            {deliveryTab === 'completed' && (
-                              <div className="space-y-3">
-                                {completedList.length === 0 ? (
-                                  <p className="text-sm text-slate-500">No completed deliveries.</p>
-                                ) : (
-                                  completedList.map(delivery => {
-                                    const statusConf = { bg: 'bg-green-100', text: 'text-green-700' };
-                                    return (
-                                      <div key={delivery.id} className="p-4 bg-slate-50/60 rounded-lg border border-slate-200/60 hover:border-slate-300 hover:bg-slate-100/40 transition-all duration-200 cursor-pointer group">
-                                        <div className="flex justify-between items-start gap-3 mb-3">
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                              <p className="font-semibold text-slate-800 text-sm truncate">{delivery.recipient}</p>
-                                              <span className="text-xs font-semibold text-slate-500 bg-slate-200/50 px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0">#{delivery.id}</span>
-                                            </div>
-                                            <p className="text-xs text-slate-500 mt-1.5">{new Date(delivery.delivery_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                                          </div>
-                                          <div className="flex items-center gap-2 flex-shrink-0">
-                                            <span className={`${statusConf.bg} ${statusConf.text} px-2.5 py-1 text-xs rounded font-semibold whitespace-nowrap`}>
-                                              Delivered
-                                            </span>
-                                            <select
-                                              defaultValue=""
-                                              onChange={async (e) => {
-                                                const v = e.target.value as 'returned' | '';
-                                                if (!v) return;
-                                                const ok = await updateDeliveryStatus(delivery.id, v);
-                                                if (ok) {
-                                                  await loadDeliveriesFromBackend();
-                                                }
-                                              }}
-                                              className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-700"
-                                            >
-                                              <option value="" disabled>Delivered</option>
-                                              <option value="returned">Mark as Returned</option>
-                                            </select>
-                                          </div>
-                                        </div>
-                                        <div className="space-y-1.5 text-xs mb-3">
-                                          {delivery.items.map((it, i) => (
-                                            <div key={i} className="flex justify-between text-slate-600">
-                                              <span>{it.variety}</span>
-                                              <span className="font-medium">{it.sacks}×{it.sack_size_kg}kg</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                        <div className="flex justify-between items-center pt-2 border-t border-slate-200/50">
-                                          <span className="text-xs text-slate-500">Total</span>
-                                          <span className="text-sm font-bold text-slate-700">{delivery.total_quantity_kg} kg</span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            )}
-
-                            {deliveryTab === 'returned_cancelled' && (
-                              <div className="space-y-3">
-                                {returnedCancelledList.length === 0 ? (
-                                  <p className="text-sm text-slate-500">No returned or cancelled deliveries.</p>
-                                ) : (
-                                  returnedCancelledList.map(delivery => {
-                                    const statusConfig = {
-                                      'returned': { bg: 'bg-amber-100', text: 'text-amber-700' },
-                                      'cancelled': { bg: 'bg-red-100', text: 'text-red-700' },
-                                    };
-                                    const statusConf = statusConfig[delivery.status as 'returned' | 'cancelled'];
-                                    return (
-                                      <div key={delivery.id} className="p-4 bg-slate-50/60 rounded-lg border border-slate-200/60 hover:border-slate-300 hover:bg-slate-100/40 transition-all duration-200 cursor-pointer group">
-                                        <div className="flex justify-between items-start gap-3 mb-3">
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                              <p className="font-semibold text-slate-800 text-sm truncate">{delivery.recipient}</p>
-                                              <span className="text-xs font-semibold text-slate-500 bg-slate-200/50 px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0">#{delivery.id}</span>
-                                            </div>
-                                            <p className="text-xs text-slate-500 mt-1.5">{new Date(delivery.delivery_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                                          </div>
-                                          <span className={`${statusConf.bg} ${statusConf.text} px-2.5 py-1 text-xs rounded font-semibold whitespace-nowrap flex-shrink-0`}>
-                                            {delivery.status}
-                                          </span>
-                                        </div>
-                                        <div className="space-y-1.5 text-xs mb-3">
-                                          {delivery.items.map((it, i) => (
-                                            <div key={i} className="flex justify-between text-slate-600">
-                                              <span>{it.variety}</span>
-                                              <span className="font-medium">{it.sacks}×{it.sack_size_kg}kg</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                        <div className="flex justify-between items-center pt-2 border-t border-slate-200/50">
-                                          <span className="text-xs text-slate-500">Total</span>
-                                          <span className="text-sm font-bold text-slate-700">{delivery.total_quantity_kg} kg</span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
+                  <p className="text-slate-700 font-semibold text-lg">No variety selected</p>
+                  <p className="text-sm text-slate-500 mt-2 text-center px-6">Select a rice variety from the list to view its details</p>
                 </div>
               )}
             </div>
           </div>
           )}
-
           {/* Deliveries Tab Content */}
           {activeTab === 'deliveries' && (
             <div className="w-full">
               <div className="bg-orange-50/90 rounded-2xl shadow-lg border border-green-300/50 overflow-hidden h-[720px] flex flex-col">
                 <div className="px-6 py-5 flex items-center justify-between mb-0 border-b border-slate-200/60">
                   <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                      <svg className="w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="1" y="3" width="15" height="13"></rect>
+                        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                        <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                        <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                      </svg>
+                    </div>
                     <div>
                       <p className="text-slate-900 font-bold text-lg leading-tight">Deliveries</p>
                       <p className="text-xs text-slate-500 mt-0.5 leading-tight">Track all shipments</p>
@@ -1873,15 +1720,52 @@ export default function InventoryPage() {
                                       <p className="font-semibold text-slate-900">{delivery.recipient}</p>
                                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">#{delivery.id}</span>
                                     </div>
-                                    <p className="text-sm text-slate-600 mb-3">{new Date(delivery.delivery_date).toLocaleDateString()}</p>
-                                    <div className="space-y-1 text-sm mb-3">
-                                      {delivery.items.map((it, i) => (
-                                        <p key={i} className="text-slate-600">{it.variety} - {it.sacks}×{it.sack_size_kg}kg</p>
-                                      ))}
+                                    <p className="text-sm text-slate-600">{formatLongDate(delivery.delivery_date)}</p>
+                                      <p className="text-xs text-slate-500 mt-1">Time: {delivery.delivery_time || '09:00'}</p>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <p className="text-sm text-slate-600">{delivery.destination}</p>
+                                      <span className={`text-xs px-2 py-1 rounded font-semibold ${delivery.method === 'delivery' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {delivery.method === 'delivery' ? 'Delivery' : 'Pick-up'}
+                                      </span>
                                     </div>
-                                    <div className="flex justify-between items-center pt-2 border-t border-blue-100">
-                                      <span className="text-xs text-slate-600">Total</span>
-                                      <span className="font-bold text-blue-700">{delivery.total_quantity_kg} kg</span>
+                                    <div className="mt-3 text-xs font-semibold text-slate-600 mb-2">Order Details:</div>
+                                    <div className="space-y-1 text-sm mb-3">
+                                      {delivery.items.map((it, i) => {
+                                        const inventoryItem = inventoryData.find(inv => inv.name === it.variety);
+                                        const pricePerKg = inventoryItem?.price || 0;
+                                        const totalKg = it.sacks * it.sack_size_kg;
+                                        const subtotal = pricePerKg * totalKg;
+                                        return (
+                                          <div key={i} className="flex justify-between text-slate-600">
+                                            <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
+                                            <span className="font-semibold text-blue-600">₱{formatPrice(subtotal)}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                    {delivery.notes && (
+                                      <div className="mt-2 p-3 bg-white/70 rounded">
+                                        <div className="text-xs font-semibold text-slate-500 mb-1">Notes</div>
+                                        <p className="text-sm text-slate-700">{delivery.notes}</p>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between items-center pt-2 border-t border-blue-100 mb-3">
+                                      <span className="text-xs text-slate-600">Total Price</span>
+                                      <span className="font-bold text-blue-700">₱{formatPrice(calculateDeliveryPrice(delivery))}</span>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => updateDeliveryStatus(delivery.id, 'delivered').then(() => loadDeliveriesFromBackend())}
+                                        className="flex-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition font-medium"
+                                      >
+                                        Complete
+                                      </button>
+                                      <button
+                                        onClick={() => updateDeliveryStatus(delivery.id, 'cancelled').then(() => loadDeliveriesFromBackend())}
+                                        className="flex-1 px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition font-medium"
+                                      >
+                                        Cancel Order
+                                      </button>
                                     </div>
                                   </div>
                                 ))
@@ -1901,8 +1785,45 @@ export default function InventoryPage() {
                                       <p className="font-semibold text-slate-900">{delivery.recipient}</p>
                                       <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">#{delivery.id}</span>
                                     </div>
-                                    <p className="text-sm text-slate-600 mb-2">{new Date(delivery.delivery_date).toLocaleDateString()}</p>
-                                    <p className="text-xs text-slate-600">Total: {delivery.total_quantity_kg} kg</p>
+                                    <p className="text-sm text-slate-600">{formatLongDate(delivery.delivery_date)}</p>
+                                      <p className="text-xs text-slate-500 mt-1">Time: {delivery.delivery_time || '09:00'}</p>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <p className="text-sm text-slate-600">{delivery.destination}</p>
+                                      <span className={`text-xs px-2 py-1 rounded font-semibold ${delivery.method === 'delivery' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {delivery.method === 'delivery' ? 'Delivery' : 'Pick-up'}
+                                      </span>
+                                    </div>
+                                    <div className="mt-3 text-xs font-semibold text-slate-600 mb-2">Order Details:</div>
+                                    <div className="space-y-1 text-sm mb-3">
+                                      {delivery.items.map((it, i) => {
+                                        const inventoryItem = inventoryData.find(inv => inv.name === it.variety);
+                                        const pricePerKg = inventoryItem?.price || 0;
+                                        const totalKg = it.sacks * it.sack_size_kg;
+                                        const subtotal = pricePerKg * totalKg;
+                                        return (
+                                          <div key={i} className="flex justify-between text-slate-600">
+                                            <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
+                                            <span className="font-semibold text-green-600">₱{formatPrice(subtotal)}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                    {delivery.notes && (
+                                      <div className="mt-2 p-3 bg-white/70 rounded">
+                                        <div className="text-xs font-semibold text-slate-500 mb-1">Notes</div>
+                                        <p className="text-sm text-slate-700">{delivery.notes}</p>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between items-center pt-2 border-t border-green-100 mb-3">
+                                      <span className="text-xs text-slate-600">Total Price</span>
+                                      <span className="font-bold text-green-700">₱{formatPrice(calculateDeliveryPrice(delivery))}</span>
+                                    </div>
+                                    <button
+                                      onClick={() => updateDeliveryStatus(delivery.id, 'returned').then(() => loadDeliveriesFromBackend())}
+                                      className="w-full px-3 py-1.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 transition font-medium"
+                                    >
+                                      Return
+                                    </button>
                                   </div>
                                 ))
                               )}
@@ -1923,8 +1844,38 @@ export default function InventoryPage() {
                                         {delivery.status}
                                       </span>
                                     </div>
-                                    <p className="text-sm text-slate-600 mb-2">{new Date(delivery.delivery_date).toLocaleDateString()}</p>
-                                    <p className="text-xs text-slate-600">Total: {delivery.total_quantity_kg} kg</p>
+                                    <p className="text-sm text-slate-600">{formatLongDate(delivery.delivery_date)}</p>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <p className="text-sm text-slate-600">{delivery.destination}</p>
+                                      <span className={`text-xs px-2 py-1 rounded font-semibold ${delivery.method === 'delivery' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {delivery.method === 'delivery' ? 'Delivery' : 'Pick-up'}
+                                      </span>
+                                    </div>
+                                    <div className="mt-3 text-xs font-semibold text-slate-600 mb-2">Order Details:</div>
+                                    <div className="space-y-1 text-sm mb-3">
+                                      {delivery.items.map((it, i) => {
+                                        const inventoryItem = inventoryData.find(inv => inv.name === it.variety);
+                                        const pricePerKg = inventoryItem?.price || 0;
+                                        const totalKg = it.sacks * it.sack_size_kg;
+                                        const subtotal = pricePerKg * totalKg;
+                                        return (
+                                          <div key={i} className="flex justify-between text-slate-600">
+                                            <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
+                                            <span className="font-semibold text-slate-600">₱{formatPrice(subtotal)}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                    {delivery.notes && (
+                                      <div className="mt-2 p-3 bg-white/70 rounded">
+                                        <div className="text-xs font-semibold text-slate-500 mb-1">Notes</div>
+                                        <p className="text-sm text-slate-700">{delivery.notes}</p>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                                      <span className="text-xs text-slate-600">Total Price</span>
+                                      <span className="font-bold text-slate-700">₱{formatPrice(calculateDeliveryPrice(delivery))}</span>
+                                    </div>
                                   </div>
                                 ))
                               )}
@@ -2710,15 +2661,25 @@ export default function InventoryPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Recipient/Customer *</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Delivery Time *</label>
                     <input
-                      type="text"
-                      value={newDelivery.recipient}
-                      onChange={(e) => setNewDelivery(prev => ({ ...prev, recipient: e.target.value }))}
+                      type="time"
+                      value={newDelivery.delivery_time}
+                      onChange={(e) => setNewDelivery(prev => ({ ...prev, delivery_time: e.target.value }))}
                       className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      placeholder="e.g., Juan Dela Cruz"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Recipient/Customer *</label>
+                  <input
+                    type="text"
+                    value={newDelivery.recipient}
+                    onChange={(e) => setNewDelivery(prev => ({ ...prev, recipient: e.target.value }))}
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="e.g., Juan Dela Cruz"
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2870,9 +2831,9 @@ export default function InventoryPage() {
       )}
 
       {/* Close main containers */}
+        </div>
+      </div>
     </div>
-  </div>
-  </div>
   );
 }
 

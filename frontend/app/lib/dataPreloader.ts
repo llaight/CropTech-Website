@@ -21,7 +21,7 @@ const CACHE_KEY = 'preloaded_data_cache';
  */
 export async function prefetchUserData(token: string): Promise<void> {
   try {
-    console.log('🚀 Prefetching user data...');
+    console.log('Prefetching user data...');
     
     const headers = {
       'Content-Type': 'application/json',
@@ -83,8 +83,8 @@ export async function prefetchUserData(token: string): Promise<void> {
     };
 
     localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
-    console.log(`✅ Prefetched ${inventory.length} inventory items, ${deliveries.length} deliveries, and ${fields.length} fields`);
-    console.log('📦 Cache stored:', cacheData);
+    console.log(`Prefetched ${inventory.length} inventory items, ${deliveries.length} deliveries, and ${fields.length} fields`);
+    console.log('Cache stored:', cacheData);
   } catch (error) {
     console.error('Error prefetching data:', error);
   }
@@ -103,12 +103,12 @@ export function getCachedData(): PreloadedData | null {
 
     // Return data if it's fresh (within cache duration)
     if (age < CACHE_DURATION) {
-      console.log(`📦 Using cached data (${Math.round(age / 1000)}s old)`);
+      console.log(`Using cached data (${Math.round(age / 1000)}s old)`);
       return data;
     }
 
     // Data is stale, remove it
-    console.log('🗑️ Cached data is stale, removing');
+    console.log('Cached data is stale, removing');
     localStorage.removeItem(CACHE_KEY);
     return null;
   } catch (error) {

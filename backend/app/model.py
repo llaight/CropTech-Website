@@ -188,6 +188,7 @@ def create_tables():
                    delivery_id SERIAL PRIMARY KEY,
                    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
                    delivery_date DATE NOT NULL,
+                     delivery_time TIME DEFAULT '09:00:00',
                    recipient TEXT NOT NULL,
                    destination TEXT NOT NULL,
                    method TEXT NOT NULL CHECK (method IN ('delivery', 'pick-up')),
@@ -198,6 +199,9 @@ def create_tables():
                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                    )
             """)
+    
+    # Add delivery_time column for existing deployments
+    cursor.execute("ALTER TABLE delivery ADD COLUMN IF NOT EXISTS delivery_time TIME DEFAULT '09:00:00';")
     
     # delivery items table
     cursor.execute("""

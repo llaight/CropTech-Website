@@ -6,6 +6,7 @@ import BackButton from "../../../components/BackButton";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { getCachedData } from "../../../lib/dataPreloader";
+import { formatLongDate } from "../../../lib/utils";
 
 /* Human-readable weather descriptions kept (no attribute removal) */
 const WEATHER_CODE_MAP: Record<number, string> = {
@@ -855,7 +856,7 @@ export default function FieldDetailPage() {
                       <div className="flex items-start justify-between">
                         <div>
                           <h2 className="text-xl font-semibold text-slate-900">{crop.name}</h2>
-                          <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date || "Not set"}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date || "Not calculated"}</span></p>
+                          <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date ? formatLongDate(crop.planting_date) : "Not set"}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date ? formatLongDate(crop.expected_harvest_date) : "Not calculated"}</span></p>
                         </div>
                         <div className="text-sm text-slate-500">
                           <div className="mb-1"><strong>Status:</strong> <span className="font-medium">{plantingStatus}</span></div>

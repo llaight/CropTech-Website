@@ -1234,6 +1234,7 @@ def create_delivery():
     
     # Validate required fields
     delivery_date = data.get("delivery_date")
+    delivery_time = data.get("delivery_time", "09:00:00")
     recipient = data.get("recipient")
     destination = data.get("destination")
     method = data.get("method", "delivery")
@@ -1264,10 +1265,10 @@ def create_delivery():
     try:
         # Insert delivery header
         cursor.execute("""
-            INSERT INTO delivery (user_id, delivery_date, recipient, destination, method, status, notes, total_quantity_kg)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO delivery (user_id, delivery_date, delivery_time, recipient, destination, method, status, notes, total_quantity_kg)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING delivery_id;
-        """, (user_id, delivery_date, recipient, destination, method, status, notes, total_qty))
+        """, (user_id, delivery_date, delivery_time, recipient, destination, method, status, notes, total_qty))
         
         row = cursor.fetchone()
         delivery_id = row[0] if row else None
@@ -1323,6 +1324,7 @@ def list_deliveries():
         # Fetch all deliveries and their items in a single JOIN query
         cursor.execute("""
             SELECT d.delivery_id, d.delivery_date, d.recipient, d.destination, 
+                    d.delivery_time,
                    d.method, d.status, d.notes, d.total_quantity_kg, d.created_at,
                    di.variety, di.sack_size_kg, di.sacks
             FROM delivery d
@@ -1340,26 +1342,30 @@ def list_deliveries():
             delivery_date = row[1]
             recipient = row[2]
             destination = row[3]
-            method = row[4]
-            status = row[5]
-            notes = row[6]
-            total_qty = row[7]
-            created_at = row[8]
-            variety = row[9]
-            sack_size_kg = row[10]
-            sacks = row[11]
+            delivery_time = row[4]
+            method = row[5]
+            status = row[6]
+            notes = row[7]
+            total_qty = row[8]
+            created_at = row[9]
+            variety = row[10]
+            sack_size_kg = row[11]
+            sacks = row[12]
             
             if delivery_id not in deliveries_dict:
                 try:
                     delivery_date_iso = delivery_date.isoformat() if hasattr(delivery_date, 'isoformat') else str(delivery_date)
+                    delivery_time_str = delivery_time.isoformat() if hasattr(delivery_time, 'isoformat') else str(delivery_time)
                     created_at_iso = created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at)
                 except Exception:
                     delivery_date_iso = str(delivery_date)
+                    delivery_time_str = str(delivery_time)
                     created_at_iso = str(created_at)
                 
                 deliveries_dict[delivery_id] = {
                     "id": delivery_id,
                     "delivery_date": delivery_date_iso,
+                    "delivery_time": delivery_time_str,
                     "recipient": recipient,
                     "destination": destination,
                     "method": method,
