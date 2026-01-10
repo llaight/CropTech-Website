@@ -21,6 +21,30 @@ interface FieldData {
   center: [number, number];
   city?: string | null;
   state?: string | null;
+  planting_date?: string | null;
+}
+
+// Helper function to get planting status
+function getPlantingStatus(plantingDate: string | null | undefined): string {
+  if (!plantingDate) return "No planting date";
+  
+  const planted = new Date(plantingDate);
+  const now = new Date();
+  const diffTime = now.getTime() - planted.getTime();
+  const diffMonths = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 30.44)); // Average month length
+  
+  if (diffMonths < 0) {
+    const monthsUntil = Math.abs(diffMonths);
+    if (monthsUntil === 0) return "To be planted soon";
+    return `To be planted in ${monthsUntil} month${monthsUntil === 1 ? '' : 's'}`;
+  } else if (diffMonths === 0) {
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return "Planted today";
+    if (diffDays === 1) return "Planted yesterday";
+    return `Planted ${diffDays} days ago`;
+  } else {
+    return `Planted ${diffMonths} month${diffMonths === 1 ? '' : 's'} ago`;
+  }
 }
 
 export default function LandTrackerPage() {
@@ -108,17 +132,35 @@ export default function LandTrackerPage() {
           return {
             id: f.id,
             name: f.name || `Field ${f.id}`,
-            crop: f.name || '', // Backend now returns crop name directly
+            crop: f.crop_name || f.name || '',
             coordinates: [],
             center,
+            planting_date: null, // Will be populated from crops API
           } as FieldData;
         });
 
-        // Reverse-geocode each field's center to obtain city and state.
-        // Only do this if we're fetching fresh data (not from cache)
-        if (!fromCache) {
-          for (let i = 0; i < fetchedFields.length; i++) {
-            const ff = fetchedFields[i];
+        // Fetch crop data for each field to get planting dates (always fetch, regardless of cache)
+        for (let i = 0; i < fetchedFields.length; i++) {
+          const ff = fetchedFields[i];
+          try {
+            // Fetch crop data for this field
+            const cropRes = await fetch(`http://localhost:5001/api/crops?field_id=${ff.id}`, { headers });
+            if (cropRes.ok) {
+              const cropData = await cropRes.json().catch(() => ({}));
+              if (cropData.crops && Array.isArray(cropData.crops) && cropData.crops.length > 0) {
+                // Get the first (or most recent) crop's planting date
+                ff.planting_date = cropData.crops[0].planting_date || null;
+                console.log(`✓ Loaded planting date for field ${ff.id}: ${ff.planting_date}`);
+              }
+            } else {
+              console.warn(`Failed to fetch crops for field ${ff.id}: ${cropRes.status}`);
+            }
+          } catch (e) {
+            console.error(`Error fetching crops for field ${ff.id}:`, e);
+          }
+
+          // Reverse-geocode each field's center to obtain city and state (only if not cached)
+          if (!fromCache) {
             try {
               const [lat, lon] = ff.center;
               if (lat !== 0 || lon !== 0) {
@@ -298,8 +340,9 @@ export default function LandTrackerPage() {
                             const centerLng = polygonPoints.reduce((sum, p) => sum + p[1], 0) / polygonPoints.length;
                             
                                 // Create new field (client-side object)
+                                const tempId = Date.now();
                                 const newField: FieldData = {
-                                  id: Date.now(),
+                                  id: tempId,
                                   name: `${selectedCrop} Field ${fields.length + 1}`,
                                   crop: selectedCrop,
                                   coordinates: polygonPoints,
@@ -343,8 +386,27 @@ export default function LandTrackerPage() {
                                         if (!cRes.ok) {
                                           console.warn('Crop creation failed', await cRes.text());
                                         }
-                                        // Attach created field id to local object
+                                        // Attach created field id to local object and set default name
                                         newField.id = createdField.id;
+                                        const defaultName = `${selectedCrop} Field ${createdField.id}`;
+
+                                        try {
+                                          const updateRes = await fetch(`http://localhost:5001/api/fields/${createdField.id}`, {
+                                            method: 'PATCH',
+                                            headers,
+                                            body: JSON.stringify({ name: defaultName }),
+                                          });
+
+                                          if (updateRes.ok) {
+                                            const updated = await updateRes.json().catch(() => ({}));
+                                            newField.name = updated.field?.name || defaultName;
+                                          } else {
+                                            newField.name = defaultName;
+                                          }
+                                        } catch (err) {
+                                          console.warn('Field name update failed', err);
+                                          newField.name = defaultName;
+                                        }
                                       }
                                     } else {
                                       console.warn('Field creation failed', await fRes.text());
@@ -433,6 +495,9 @@ export default function LandTrackerPage() {
                     >
                       <h3 className="font-semibold text-green-800">{field.name}</h3>
                       <p className="text-sm text-slate-600">Crops: {field.crop}</p>
+                      <p className="text-sm font-medium text-blue-600">
+                        {getPlantingStatus(field.planting_date)}
+                      </p>
                       <p className="text-xs text-slate-500">
                         Coordinates: {field.center[0].toFixed(4)}°N, {field.center[1].toFixed(4)}°E
                       </p>

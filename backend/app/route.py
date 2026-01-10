@@ -688,6 +688,7 @@ def delete_inventory_item(item_id):
 @bp.route("/fields", methods=["POST"]) 
 def create_field():
     data = request.get_json() or {}
+    name = data.get("name")
     location = data.get("location")
 
     if not location:
@@ -714,7 +715,7 @@ def create_field():
 
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO fields (location, user_id) VALUES (%s, %s) RETURNING field_id;", (location, user_id))
+        cursor.execute("INSERT INTO fields (name, location, user_id) VALUES (%s, %s, %s) RETURNING field_id;", (name, location, user_id))
         row = cursor.fetchone()
         conn.commit()
         field_id = row[0] if row else None
@@ -724,15 +725,18 @@ def create_field():
         conn.close()
         return jsonify({"message": "Error creating field", "error": str(e)}), 500
 
+    response_name = name if name else (f"Field {field_id}" if field_id is not None else None)
+
     cursor.close()
     conn.close()
-    return jsonify({"field": {"id": field_id, "location": location, "user_id": user_id}}), 201
+    return jsonify({"field": {"id": field_id, "name": response_name, "location": location, "user_id": user_id}}), 201
 
 
 @bp.route("/fields", methods=["GET"]) 
 def list_fields():
     # Optional query params: user_id
     q_user = request.args.get("user_id")
+    q_id = request.args.get("id")
 
     conn = get_connection()
     if conn is None:
@@ -741,38 +745,42 @@ def list_fields():
     cursor = conn.cursor()
     try:
         # Use LEFT JOIN to get the first crop name for each field in one query
+        base_query = """
+                SELECT f.field_id, f.name, f.location, f.user_id, c.name
+                FROM fields f
+                LEFT JOIN (
+                    SELECT DISTINCT ON (field_id) field_id, name 
+                    FROM crops 
+                    ORDER BY field_id, crop_id
+                ) c ON f.field_id = c.field_id
+        """
+
+        filters = []
+        params = []
         if q_user:
-            cursor.execute("""
-                SELECT f.field_id, f.location, f.user_id, c.name
-                FROM fields f
-                LEFT JOIN (
-                    SELECT DISTINCT ON (field_id) field_id, name 
-                    FROM crops 
-                    ORDER BY field_id, crop_id
-                ) c ON f.field_id = c.field_id
-                WHERE f.user_id=%s
-                ORDER BY f.field_id;
-            """, (q_user,))
-        else:
-            cursor.execute("""
-                SELECT f.field_id, f.location, f.user_id, c.name
-                FROM fields f
-                LEFT JOIN (
-                    SELECT DISTINCT ON (field_id) field_id, name 
-                    FROM crops 
-                    ORDER BY field_id, crop_id
-                ) c ON f.field_id = c.field_id
-                ORDER BY f.field_id;
-            """)
+            filters.append("f.user_id=%s")
+            params.append(q_user)
+        if q_id:
+            filters.append("f.field_id=%s")
+            params.append(q_id)
+
+        if filters:
+            base_query += " WHERE " + " AND ".join(filters)
+
+        base_query += " ORDER BY f.field_id;"
+
+        cursor.execute(base_query, tuple(params))
         rows = cursor.fetchall()
         fields = []
         for row in rows:
-            fid, location, uid, crop_name = row
+            fid, fname, location, uid, crop_name = row
+            display_name = fname or (crop_name + f" Field {fid}" if crop_name else f"Field {fid}")
             fields.append({
                 "id": fid, 
+                "name": display_name,
                 "location": location, 
                 "user_id": uid,
-                "name": crop_name or f"Field {fid}"
+                "crop_name": crop_name
             })
     except Exception as e:
         conn.rollback()
@@ -785,6 +793,57 @@ def list_fields():
     return jsonify({"fields": fields}), 200
 
 
+@bp.route("/fields/<int:field_id>", methods=["PATCH", "PUT"])
+def update_field(field_id: int):
+    data = request.get_json() or {}
+    name = data.get("name")
+    location = data.get("location")
+
+    if name is None and location is None:
+        return jsonify({"message": "No fields to update"}), 400
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        updates = []
+        params = []
+        if name is not None:
+            updates.append("name=%s")
+            params.append(name)
+        if location is not None:
+            updates.append("location=%s")
+            params.append(location)
+
+        params.append(field_id)
+
+        cursor.execute(
+            f"UPDATE fields SET {', '.join(updates)} WHERE field_id=%s RETURNING field_id, name, location, user_id;",
+            tuple(params)
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Field not found"}), 404
+
+        conn.commit()
+        fid, fname, loc, uid = row
+        response_name = fname or f"Field {fid}"
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error updating field", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"field": {"id": fid, "name": response_name, "location": loc, "user_id": uid}}), 200
+
+
 # -------------------------
 # Crops endpoints
 # -------------------------
@@ -794,6 +853,8 @@ def create_crop():
     name = data.get("name")
     health_status = data.get("health_status")
     planting_date = data.get("planting_date")  # expect YYYY-MM-DD or None
+    expected_harvest_date = data.get("expected_harvest_date")  # expect YYYY-MM-DD or None
+    notes = data.get("notes")
     field_id = data.get("field_id")
 
     if not name:
@@ -820,8 +881,8 @@ def create_crop():
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO crops (name, health_status, planting_date, user_id, field_id) VALUES (%s, %s, %s, %s, %s) RETURNING crop_id;",
-            (name, health_status, planting_date, user_id, field_id),
+            "INSERT INTO crops (name, health_status, planting_date, expected_harvest_date, notes, user_id, field_id) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING crop_id;",
+            (name, health_status, planting_date, expected_harvest_date, notes, user_id, field_id),
         )
         row = cursor.fetchone()
         conn.commit()
@@ -834,7 +895,7 @@ def create_crop():
 
     cursor.close()
     conn.close()
-    return jsonify({"crop": {"id": crop_id, "name": name, "health_status": health_status, "planting_date": planting_date, "user_id": user_id, "field_id": field_id}}), 201
+    return jsonify({"crop": {"id": crop_id, "name": name, "health_status": health_status, "planting_date": planting_date, "expected_harvest_date": expected_harvest_date, "notes": notes, "user_id": user_id, "field_id": field_id}}), 201
 
 
 @bp.route("/crops", methods=["GET"]) 
@@ -849,23 +910,25 @@ def list_crops():
     cursor = conn.cursor()
     try:
         if q_user and q_field:
-            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops WHERE user_id=%s AND field_id=%s;", (q_user, q_field))
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, expected_harvest_date, notes, user_id, field_id FROM crops WHERE user_id=%s AND field_id=%s;", (q_user, q_field))
         elif q_user:
-            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops WHERE user_id=%s;", (q_user,))
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, expected_harvest_date, notes, user_id, field_id FROM crops WHERE user_id=%s;", (q_user,))
         elif q_field:
-            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops WHERE field_id=%s;", (q_field,))
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, expected_harvest_date, notes, user_id, field_id FROM crops WHERE field_id=%s;", (q_field,))
         else:
-            cursor.execute("SELECT crop_id, name, health_status, planting_date, user_id, field_id FROM crops;")
+            cursor.execute("SELECT crop_id, name, health_status, planting_date, expected_harvest_date, notes, user_id, field_id FROM crops;")
 
         rows = cursor.fetchall()
         crops = []
         for row in rows:
-            cid, name, health_status, planting_date, uid, fid = row
+            cid, name, health_status, planting_date, expected_harvest_date, notes, uid, fid = row
             crops.append({
                 "id": cid,
                 "name": name,
                 "health_status": health_status,
                 "planting_date": planting_date.isoformat() if planting_date else None,
+                "expected_harvest_date": expected_harvest_date.isoformat() if expected_harvest_date else None,
+                "notes": notes,
                 "user_id": uid,
                 "field_id": fid,
             })
@@ -878,6 +941,75 @@ def list_crops():
     cursor.close()
     conn.close()
     return jsonify({"crops": crops}), 200
+
+
+@bp.route("/crops/<int:crop_id>", methods=["PATCH"])
+def update_crop(crop_id):
+    data = request.get_json() or {}
+    planting_date = data.get("planting_date")  # expect YYYY-MM-DD or None
+    expected_harvest_date = data.get("expected_harvest_date")  # expect YYYY-MM-DD or None
+    name = data.get("name")
+    health_status = data.get("health_status")
+    notes = data.get("notes")
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # Build dynamic UPDATE statement
+        updates = []
+        values = []
+        if planting_date is not None:
+            updates.append("planting_date = %s")
+            values.append(planting_date)
+        if expected_harvest_date is not None:
+            updates.append("expected_harvest_date = %s")
+            values.append(expected_harvest_date)
+        if name is not None:
+            updates.append("name = %s")
+            values.append(name)
+        if health_status is not None:
+            updates.append("health_status = %s")
+            values.append(health_status)
+        if notes is not None:
+            updates.append("notes = %s")
+            values.append(notes)
+
+        if not updates:
+            return jsonify({"message": "No fields to update"}), 400
+
+        values.append(crop_id)
+        update_stmt = f"UPDATE crops SET {', '.join(updates)} WHERE crop_id = %s RETURNING crop_id, name, health_status, planting_date, expected_harvest_date, notes, user_id, field_id;"
+        
+        cursor.execute(update_stmt, values)
+        row = cursor.fetchone()
+        conn.commit()
+
+        if not row:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Crop not found"}), 404
+
+        cid, name, health_status, planting_date, expected_harvest_date, notes, uid, fid = row
+        cursor.close()
+        conn.close()
+        return jsonify({"crop": {
+            "id": cid,
+            "name": name,
+            "health_status": health_status,
+            "planting_date": planting_date.isoformat() if planting_date else None,
+            "expected_harvest_date": expected_harvest_date.isoformat() if expected_harvest_date else None,
+            "notes": notes,
+            "user_id": uid,
+            "field_id": fid,
+        }}), 200
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error updating crop", "error": str(e)}), 500
 
 
 # -------------------------

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PlantingCalendar from "../components/PlantingCalendar";
 import BackButton from "../../../components/BackButton";
 import Link from "next/link";
@@ -322,29 +322,167 @@ export default function FieldDetailPage() {
     location: null,
     description: null,
   });
-  const [crop] = useState({
-    name: "Jasmine Rice",
-    planting_date: "2025-10-01",
-    expected_harvest_date: "2026-02-15",
-    health_status: "Good",
-    notes: "No major pests detected. Apply balanced NPK at 45 days.",
-  });
+  const [crop, setCrop] = useState<{
+    name: string;
+    planting_date: string | null;
+    expected_harvest_date: string | null;
+    health_status: string | null;
+    notes: string;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [fieldName, setFieldName] = useState("");
+  const [nameDirty, setNameDirty] = useState(false);
+  const [isSavingName, setIsSavingName] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+
+  const defaultFieldName = useMemo(() => {
+    const fid = field?.id ?? fieldId;
+    if (field?.name) return field.name;
+    if (crop?.name) return `${crop.name} Field ${fid}`;
+    return `Field ${fid}`;
+  }, [crop?.name, field?.id, field?.name, fieldId]);
+
+  const plantingStatus = useMemo(() => {
+    if (!crop?.planting_date) return "Planting date not set";
+    
+    // Parse as date only (ignore time) to avoid timezone issues
+    const [year, month, day] = crop.planting_date.split('-').map(Number);
+    const planted = new Date(year, month - 1, day); // month is 0-indexed
+    if (Number.isNaN(planted.getTime())) return "Planting date invalid";
+
+    // Get today's date at midnight
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    planted.setHours(0, 0, 0, 0);
+
+    const diffMs = today.getTime() - planted.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffMonths = Math.floor(diffDays / 30.44);
+
+    if (diffMonths < 0) {
+      const monthsUntil = Math.abs(diffMonths);
+      if (monthsUntil === 0) return "Planted soon";
+      return `To be planted in ${monthsUntil} month${monthsUntil === 1 ? "" : "s"}`;
+    }
+
+    if (diffMonths === 0) {
+      if (diffDays === 0) return "Planted today";
+      if (diffDays === 1) return "Planted yesterday";
+      return `Planted ${diffDays} days ago`;
+    }
+
+    return `Planted ${diffMonths} month${diffMonths === 1 ? "" : "s"} ago`;
+  }, [crop?.planting_date]);
+
+  useEffect(() => {
+    if (!nameDirty) {
+      setFieldName(defaultFieldName);
+    }
+  }, [defaultFieldName, nameDirty]);
+
+  const saveFieldName = async () => {
+    const targetId = field?.id ?? fieldId;
+    if (!targetId) return;
+
+    const nextName = (fieldName || "").trim() || defaultFieldName;
+
+    setIsSavingName(true);
+    setNameError(null);
+    try {
+      const headers: any = { "Content-Type": "application/json" };
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`http://127.0.0.1:5001/api/fields/${targetId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ name: nextName }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        setNameError(text || "Failed to save field name");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const updatedName = data.field?.name || nextName;
+        setField((prev) => (prev ? { ...prev, name: updatedName } : prev));
+        setFieldName(updatedName);
+        setNameDirty(false);
+        setIsNameModalOpen(false);
+      }
+    } catch (err: any) {
+      setNameError(err?.message || "Network error while saving field name");
+    } finally {
+      setIsSavingName(false);
+    }
+  };
+
+  const updateCropPlantingDate = async (newPlantingDate: string) => {
+    if (!crop || !crop.name) return;
+
+    try {
+      const headers: any = { "Content-Type": "application/json" };
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // Find the crop ID by fetching crops again
+      const cropRes = await fetch(`http://localhost:5001/api/crops?field_id=${fieldId}`, { headers });
+      if (!cropRes.ok) return;
+
+      const cropData = await cropRes.json().catch(() => ({}));
+      if (!cropData.crops || !Array.isArray(cropData.crops) || cropData.crops.length === 0) return;
+
+      const cropId = cropData.crops[0].id;
+
+      // Update the crop's planting date
+      const updateRes = await fetch(`http://127.0.0.1:5001/api/crops/${cropId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ planting_date: newPlantingDate }),
+      });
+
+      if (updateRes.ok) {
+        const updatedCropData = await updateRes.json().catch(() => ({}));
+        const updatedCrop = updatedCropData.crop;
+        if (updatedCrop) {
+          // Calculate expected harvest date (assume 120 days rice growing cycle)
+          let expectedHarvest = null;
+          if (updatedCrop.planting_date) {
+            const plantDate = new Date(updatedCrop.planting_date);
+            const harvestDate = new Date(plantDate);
+            harvestDate.setDate(harvestDate.getDate() + 120);
+            expectedHarvest = harvestDate.toISOString().slice(0, 10);
+          }
+
+          setCrop({
+            name: updatedCrop.name || crop.name,
+            planting_date: updatedCrop.planting_date || null,
+            expected_harvest_date: expectedHarvest,
+            health_status: updatedCrop.health_status || crop.health_status,
+            notes: crop.notes,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Error updating crop planting date:", err);
+    }
+  };
 
   useEffect(() => {
     const loadFieldData = async () => {
       setIsLoading(true);
 
       // Try to get field from cache first
-      console.log("🔍 Checking for cached field data for ID:", fieldId);
+      console.log("Checking for cached field data for ID:", fieldId);
       const cachedData = getCachedData();
       let fieldData = null;
 
       if (cachedData && Array.isArray(cachedData.fields)) {
-        console.log("📦 Found cached fields, searching for ID:", fieldId);
+        console.log("Found cached fields, searching for ID:", fieldId);
         fieldData = cachedData.fields.find((f: any) => String(f.id) === String(fieldId));
         if (fieldData) {
-          console.log("✅ Field found in cache:", fieldData);
+          console.log("Field found in cache:", fieldData);
         }
       }
 
@@ -418,7 +556,7 @@ export default function FieldDetailPage() {
             if (gData.state) parts.push(gData.state);
             const city = parts.length > 0 ? parts.join(", ") : gData.display_name ?? null;
             setCityName(city);
-            console.log("🗺️ City name loaded:", city);
+            console.log("City name loaded:", city);
           }
         } catch (e) {
           console.error("Error reverse geocoding:", e);
@@ -484,13 +622,48 @@ export default function FieldDetailPage() {
             };
 
             setWeather(weatherData);
-            console.log("🌤️ Weather data loaded:", weatherData);
+            console.log("Weather data loaded:", weatherData);
           }
         } catch (e) {
           console.error("Error fetching weather:", e);
         }
       }
+      // Fetch crop data for this field
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const headers: any = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
 
+        const cropRes = await fetch(`http://localhost:5001/api/crops?field_id=${fieldId}`, { headers });
+        if (cropRes.ok) {
+          const cropData = await cropRes.json().catch(() => ({}));
+          if (cropData.crops && Array.isArray(cropData.crops) && cropData.crops.length > 0) {
+            const fetchedCrop = cropData.crops[0];
+            
+            // Calculate expected harvest date (assume 120 days rice growing cycle)
+            let expectedHarvest = null;
+            if (fetchedCrop.planting_date) {
+              const plantDate = new Date(fetchedCrop.planting_date);
+              const harvestDate = new Date(plantDate);
+              harvestDate.setDate(harvestDate.getDate() + 120); // 120 days cycle
+              expectedHarvest = harvestDate.toISOString().slice(0, 10);
+            }
+
+            setCrop({
+              name: fetchedCrop.name || "Unknown Crop",
+              planting_date: fetchedCrop.planting_date || null,
+              expected_harvest_date: expectedHarvest,
+              health_status: fetchedCrop.health_status || "Unknown",
+              notes: "Crop data from database. Expected harvest calculated based on 120-day growing cycle.",
+            });
+            console.log("🌾 Crop data loaded:", fetchedCrop);
+          } else {
+            console.log("No crop data found for this field");
+          }
+        }
+      } catch (e) {
+        console.error("Error fetching crop data:", e);
+      }
       setIsLoading(false);
     };
 
@@ -514,8 +687,24 @@ export default function FieldDetailPage() {
               <div className="flex-1">
                 <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 flex items-start justify-between gap-4">
                   <div>
-                    <h1 className="text-xl font-extrabold text-slate-900">{field.name}</h1>
-                    <p className="text-sm text-slate-500">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h1 className="text-xl font-extrabold text-slate-900">{field.name || defaultFieldName}</h1>
+                      <button
+                        onClick={() => {
+                          setFieldName(field.name || defaultFieldName);
+                          setNameDirty(false);
+                          setNameError(null);
+                          setIsNameModalOpen(true);
+                        }}
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Edit field name"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <p className="text-sm text-slate-500 mt-2">
                       Field ID: <span className="font-medium text-slate-700">{field.id}</span>
                     </p>
                     <p className="mt-1 text-sm text-slate-600 hidden sm:block">{cityName ?? field.location}</p>
@@ -527,6 +716,49 @@ export default function FieldDetailPage() {
                 </div>
               </div>
             </div>
+
+            {isNameModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+                <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6">
+                  <h2 className="text-lg font-semibold text-slate-900">Edit field name</h2>
+                  <p className="text-sm text-slate-500 mt-1">Default is crop name + field ID if unchanged.</p>
+                  <div className="mt-4 space-y-2">
+                    <label className="text-sm font-medium text-slate-700" htmlFor="field-name-input">Field name</label>
+                    <input
+                      id="field-name-input"
+                      value={fieldName}
+                      onChange={(e) => {
+                        setFieldName(e.target.value);
+                        setNameDirty(true);
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder={defaultFieldName}
+                    />
+                    {nameError && <p className="text-xs text-red-600">{nameError}</p>}
+                  </div>
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button
+                      onClick={() => {
+                        setIsNameModalOpen(false);
+                        setNameDirty(false);
+                        setFieldName(field.name || defaultFieldName);
+                        setNameError(null);
+                      }}
+                      className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={saveFieldName}
+                      disabled={isSavingName}
+                      className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg shadow hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {isSavingName ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Main grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -604,44 +836,54 @@ export default function FieldDetailPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 border-t pt-3 text-xs text-slate-500">
+                {/*debug info for OpenWeather API*/}
+                {/* <div className="mt-4 border-t pt-3 text-xs text-slate-500">
                   <div><strong>Weather Code:</strong> {weather.weather_code ?? "—"}</div>
                   <div><strong>Wind Dir (10m):</strong> {weather.wind_direction_10m ?? "—"}°</div>
                   <div><strong>Field ID (weather):</strong> {weather.field_id ?? "—"}</div>
                   <div><strong>Location (weather):</strong> {weather.location ?? field.location ?? "—"}</div>
                   <div><strong>Raw Temp Value:</strong> {weather.temperature ?? "—"}</div>
                   <div className="mt-2 text-xs text-slate-400">All weather attributes are shown for diagnostics and kept intact.</div>
-                </div>
+                </div> */}
               </div>
 
               {/* Crop details & planting calendar */}
               <div className="lg:col-span-2 space-y-6">
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h2 className="text-xl font-semibold text-slate-900">{crop.name}</h2>
-                      <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date}</span></p>
-                    </div>
-                    <div className="text-sm text-slate-500">
-                      <div className="mb-1"><strong>Status:</strong> <span className="font-medium">{crop.health_status}</span></div>
-                      <div><strong>Area:</strong> <span className="font-medium">{field.area_ha} ha</span></div>
-                    </div>
-                  </div>
+                {crop ? (
+                  <>
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h2 className="text-xl font-semibold text-slate-900">{crop.name}</h2>
+                          <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date || "Not set"}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date || "Not calculated"}</span></p>
+                        </div>
+                        <div className="text-sm text-slate-500">
+                          <div className="mb-1"><strong>Status:</strong> <span className="font-medium">{plantingStatus}</span></div>
+                          <div><strong>Area:</strong> <span className="font-medium">{field.area_ha} ha</span></div>
+                        </div>
+                      </div>
 
-                  <div className="mt-4 text-sm text-slate-600">
-                    <h4 className="font-medium mb-1">Notes</h4>
-                    <p className="leading-relaxed">{crop.notes}</p>
-                  </div>
-                </div>
+                      <div className="mt-4 text-sm text-slate-600">
+                        <h4 className="font-medium mb-1">Notes</h4>
+                        <p className="leading-relaxed">{crop.notes}</p>
+                      </div>
+                    </div>
 
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
-                  <h3 className="text-lg font-semibold mb-4">Planting & Harvest Calendar</h3>
-                  <PlantingCalendar
-                    fieldId={field.id}
-                    initialPlantingDate={crop.planting_date}
-                    initialHarvestDate={crop.expected_harvest_date}
-                  />
-                </div>
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                      <h3 className="text-lg font-semibold mb-4">Planting & Harvest Calendar</h3>
+                      <PlantingCalendar
+                        fieldId={field.id}
+                        initialPlantingDate={crop.planting_date || undefined}
+                        initialHarvestDate={crop.expected_harvest_date || undefined}
+                        onPlantingDateChange={updateCropPlantingDate}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                    <p className="text-slate-500">No crop data available for this field.</p>
+                  </div>
+                )}
 
                 <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
                   <h3 className="text-lg font-semibold mb-3">Field Summary</h3>

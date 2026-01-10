@@ -65,12 +65,16 @@ def create_tables():
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS fields(
                    field_id SERIAL PRIMARY KEY,
+                   name TEXT,
                    location TEXT NOT NULL,
                    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE
                   )
             """)
 
-    #weather data table (created after fields so FK can reference fields)
+    # Add name column for existing deployments
+    cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS name TEXT;")
+
+    #weather data table
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS weather(
                    weather_id SERIAL PRIMARY KEY,
@@ -87,8 +91,7 @@ def create_tables():
                    location TEXT
                    )
             """)
-    # Ensure columns exist for existing tables (handle upgrades/migrations)
-    # ALTER TABLE ADD COLUMN IF NOT EXISTS is supported in modern Postgres
+    # ALTER TABLE ADD COLUMN IF NOT EXISTS
     cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS weather_code INT;")
     cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS temperature FLOAT;")
     cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS relative_humidity FLOAT;")
@@ -99,10 +102,8 @@ def create_tables():
     cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS wind_direction_10m FLOAT;")
     cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS field_id INTEGER;")
     cursor.execute("ALTER TABLE weather ADD COLUMN IF NOT EXISTS location TEXT;")
-    # Ensure foreign key constraint for field_id exists if possible (skip if already present)
-    # Note: adding FK constraints via ALTER while avoiding duplicates is more involved; keep simple for now
-    
-    # inventory table - UPDATED with detailed sack information and condition categories
+
+    # inventory table
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS inventory(
                    item_id SERIAL PRIMARY KEY,
@@ -139,10 +140,16 @@ def create_tables():
                    name TEXT NOT NULL,
                    health_status TEXT,
                    planting_date DATE,
+                   expected_harvest_date DATE,
+                   notes TEXT,
                    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
                    field_id INTEGER REFERENCES fields(field_id) ON DELETE CASCADE
                    )       
             """)
+    
+    # Add missing columns for existing deployments
+    cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS expected_harvest_date DATE;")
+    cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS notes TEXT;")
     
     # marketprice table
     cursor.execute("""
@@ -192,7 +199,7 @@ def create_tables():
                    )
             """)
     
-    # delivery items table (line items for each delivery)
+    # delivery items table
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS delivery_item(
                    item_id SERIAL PRIMARY KEY,

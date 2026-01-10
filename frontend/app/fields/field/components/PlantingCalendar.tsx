@@ -6,19 +6,22 @@ import Image from "next/image";
 import waterIcon from "./water.png";
 import fertilizerIcon from "./fertilizer.png";
 import pesticideIcon from "./pesticide.png";
+import typhoonIcon from "./typhoon.png";
 
 interface Props {
   fieldId: string | number;
   initialPlantingDate?: string;
   initialHarvestDate?: string;
+  onPlantingDateChange?: (date: string) => void;
+  onHarvestDateChange?: (date: string) => void;
 }
 
-export default function PlantingCalendar({ fieldId, initialPlantingDate, initialHarvestDate }: Props) {
+export default function PlantingCalendar({ fieldId, initialPlantingDate, initialHarvestDate, onPlantingDateChange, onHarvestDateChange }: Props) {
   const storageKey = `field-${fieldId}-dates`;
   const eventsKey = `field-${fieldId}-events`;
   const [plantingDate, setPlantingDate] = useState<string>(initialPlantingDate ?? "");
   const [harvestDate, setHarvestDate] = useState<string>(initialHarvestDate ?? "");
-  const [events, setEvents] = useState<Record<string, { watered?: boolean; fertilizer?: boolean; pesticide?: boolean; note?: string }>>({});
+  const [events, setEvents] = useState<Record<string, { watered?: boolean; fertilizer?: boolean; pesticide?: boolean; typhoon?: boolean; note?: string }>>({});
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -58,7 +61,15 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
     } catch (e) {
       console.error("Error saving dates to localStorage:", e);
     }
-  }, [plantingDate, harvestDate, storageKey, isLoading]);
+
+    // Notify parent of changes
+    if (plantingDate) {
+      onPlantingDateChange?.(plantingDate);
+    }
+    if (harvestDate) {
+      onHarvestDateChange?.(harvestDate);
+    }
+  }, [plantingDate, harvestDate, storageKey, isLoading, onPlantingDateChange, onHarvestDateChange]);
 
   // Save events when they change
   useEffect(() => {
@@ -115,7 +126,7 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
   const [visibleMonthIndex, setVisibleMonthIndex] = useState<number>(0);
   useEffect(() => setVisibleMonthIndex(0), [plantingDate, calendarRanges.length]);
 
-  function toggleEventForDate(dateKey: string, key: 'watered' | 'fertilizer' | 'pesticide') {
+  function toggleEventForDate(dateKey: string, key: 'watered' | 'fertilizer' | 'pesticide' | 'typhoon') {
     setEvents(prev => {
       const prevEntry = prev[dateKey] ?? {};
       const updated = { ...prev, [dateKey]: { ...prevEntry, [key]: !prevEntry[key as keyof typeof prevEntry] } };
@@ -129,11 +140,11 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
 
   function exportEventsCSV() {
     try {
-      const header = ['date', 'watered', 'fertilizer', 'pesticide', 'note'];
+      const header = ['date', 'watered', 'fertilizer', 'pesticide', 'typhoon', 'note'];
       const keys = Object.keys(events).sort();
       const rows = [header, ...keys.map(k => {
         const e = events[k] ?? {};
-        return [k, e.watered ? '1' : '0', e.fertilizer ? '1' : '0', e.pesticide ? '1' : '0', e.note ? String(e.note) : ''];
+        return [k, e.watered ? '1' : '0', e.fertilizer ? '1' : '0', e.pesticide ? '1' : '0', e.typhoon ? '1' : '0', e.note ? String(e.note) : ''];
       })];
       const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -233,7 +244,7 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
             </div>
 
             {/* Legend for event icons */}
-            <div className="flex items-center gap-4 text-sm text-slate-700">
+            <div className="flex items-center gap-4 text-sm text-slate-700 flex-wrap">
               <div className="flex items-center gap-2">
                 <div className="w-5 h-5 flex items-center justify-center">
                   <Image 
@@ -269,6 +280,18 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                   />
                 </div>
                 <span>Pesticide</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 flex items-center justify-center">
+                  <Image 
+                    src={typhoonIcon}
+                    alt="Typhoon" 
+                    width={16} 
+                    height={16} 
+                    className="w-4 h-4"
+                  />
+                </div>
+                <span>Typhoon</span>
               </div>
             </div>
 
@@ -311,7 +334,12 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                       const e = events[key];
                       const isPlanting = plantingDate === key;
                       const isHarvest = harvestDate === key;
-                      const highlightClass = isPlanting || isHarvest ? 'bg-green-200/80 ring-2 ring-green-400' : '';
+                      const hasTyphoon = e?.typhoon;
+                      const highlightClass = hasTyphoon 
+                        ? 'bg-red-100 ring-2 ring-red-400' 
+                        : isPlanting || isHarvest 
+                        ? 'bg-green-200/80 ring-2 ring-green-400' 
+                        : '';
                       return (
                         <button
                           key={key}
@@ -323,35 +351,46 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                             <div className="text-sm">{day}</div>
                             <div className="flex items-center gap-1">
                               {e?.watered && (
-                                <div className="w-4 h-4 flex items-center justify-center">
+                                <div className="w-5 h-5 flex items-center justify-center">
                                   <Image 
                                     src={waterIcon}
                                     alt="Watered" 
-                                    width={12} 
-                                    height={12} 
-                                    className="w-3 h-3"
+                                    width={16} 
+                                    height={16} 
+                                    className="w-4 h-4"
                                   />
                                 </div>
                               )}
                               {e?.fertilizer && (
-                                <div className="w-4 h-4 flex items-center justify-center">
+                                <div className="w-5 h-5 flex items-center justify-center">
                                   <Image 
                                     src={fertilizerIcon}
                                     alt="Fertilizer" 
-                                    width={12} 
-                                    height={12} 
-                                    className="w-3 h-3"
+                                    width={16} 
+                                    height={16} 
+                                    className="w-4 h-4"
                                   />
                                 </div>
                               )}
                               {e?.pesticide && (
-                                <div className="w-4 h-4 flex items-center justify-center">
+                                <div className="w-5 h-5 flex items-center justify-center">
                                   <Image 
                                     src={pesticideIcon}
                                     alt="Pesticide" 
-                                    width={12} 
-                                    height={12} 
-                                    className="w-3 h-3"
+                                    width={16} 
+                                    height={16} 
+                                    className="w-4 h-4"
+                                  />
+                                </div>
+                              )}
+                              {e?.typhoon && (
+                                <div className="w-5 h-5 flex items-center justify-center">
+                                  <Image 
+                                    src={typhoonIcon}
+                                    alt="Typhoon" 
+                                    width={16} 
+                                    height={16} 
+                                    className="w-4 h-4"
                                   />
                                 </div>
                               )}
@@ -372,7 +411,7 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                   <div className="font-medium">Edit events for {selectedDate}</div>
                   <div className="text-sm text-slate-500">{new Date(selectedDate).toLocaleDateString()}</div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
                   <label className="flex items-center gap-2">
                     <input type="checkbox" checked={!!events[selectedDate]?.watered} onChange={() => toggleEventForDate(selectedDate, 'watered')} />
                     <span className="text-sm">Watered</span>
@@ -384,6 +423,10 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                   <label className="flex items-center gap-2">
                     <input type="checkbox" checked={!!events[selectedDate]?.pesticide} onChange={() => toggleEventForDate(selectedDate, 'pesticide')} />
                     <span className="text-sm">Pesticide</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={!!events[selectedDate]?.typhoon} onChange={() => toggleEventForDate(selectedDate, 'typhoon')} />
+                    <span className="text-sm">Typhoon</span>
                   </label>
                 </div>
 
