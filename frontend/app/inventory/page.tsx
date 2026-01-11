@@ -323,18 +323,19 @@ export default function InventoryPage() {
 
   // Load data from localStorage on initial render
   useEffect(() => {
-    try {
-      // Try to load user from localStorage
-      const raw = localStorage.getItem("user");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setUser(parsed);
-      }
-      
-      // Try to load preloaded cached data first (from login prefetch)
-      const cachedData = getCachedData();
-      let inventoryLoaded = false;
-      let deliveriesLoaded_local = false;
+    const loadData = async () => {
+      try {
+        // Try to load user from localStorage
+        const raw = localStorage.getItem("user");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          setUser(parsed);
+        }
+        
+        // Try to load preloaded cached data first (from login prefetch)
+        const cachedData = getCachedData();
+        let inventoryLoaded = false;
+        let deliveriesLoaded_local = false;
       
       if (cachedData) {
         // Use preloaded inventory data if available
@@ -363,8 +364,9 @@ export default function InventoryPage() {
               rice_display_condition,
             };
           });
-          setInventoryData(validatedData);
-          console.log("✅ Loaded inventory from preloaded cache:", validatedData.length, "items");
+          const deduplicatedData = deduplicateItems(validatedData);
+          setInventoryData(deduplicatedData);
+          console.log("✅ Loaded inventory from preloaded cache:", deduplicatedData.length, "items");
           inventoryLoaded = true;
         }
         
@@ -377,53 +379,67 @@ export default function InventoryPage() {
         }
       }
       
-      // Fallback to localStorage if no cached data
+      // Fallback to localStorage or backend if no cached data
       if (!inventoryLoaded) {
-        const savedInventory = localStorage.getItem(STORAGE_KEYS.INVENTORY);
-        
-        if (savedInventory) {
-          // Parse and validate the saved data
-          const parsedData = JSON.parse(savedInventory);
-          
-          // Validate that it's an array and has the basic structure
-          if (Array.isArray(parsedData) && parsedData.length > 0) {
-            // Ensure all items have required fields
-            const validatedData = parsedData.map((item: any) => {
-              // Calculate totals if they don't exist
-              const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
-              const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
-              const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
-              const total_weight_rice_kg = (item.sacks_of_rice_25kg * 25) + (item.sacks_of_rice_50kg * 50);
-              
-              const grains_display_condition = item.grains_condition === "others" && item.grains_condition_other 
-                ? item.grains_condition_other 
-                : item.grains_condition;
-              
-              const rice_display_condition = item.rice_condition === "others" && item.rice_condition_other 
-                ? item.rice_condition_other 
-                : item.rice_condition;
-              
-              return {
-                ...item,
-                total_sacks_of_grains,
-                total_sacks_of_rice,
-                total_weight_grains_kg,
-                total_weight_rice_kg,
-                grains_display_condition,
-                rice_display_condition,
-              };
-            });
-            
-            setInventoryData(validatedData);
-            console.log("Loaded inventory from localStorage:", validatedData.length, "items");
-          } else {
-            // If saved data is invalid, use default
-            setInventoryData(DEFAULT_SAMPLE_INVENTORY);
-            saveToLocalStorage(DEFAULT_SAMPLE_INVENTORY);
+        // First try loading from backend if user is logged in
+        const token = localStorage.getItem('token') || (raw && JSON.parse(raw)?.token);
+        if (token) {
+          const backendData = await loadInventoryFromBackend();
+          if (backendData && backendData.length > 0) {
+            const deduplicatedData = deduplicateItems(backendData);
+            setInventoryData(deduplicatedData);
+            inventoryLoaded = true;
           }
-        } else {
-          // No saved data, start with empty array
-          setInventoryData([]);
+        }
+        
+        // If backend load failed or no token, try localStorage
+        if (!inventoryLoaded) {
+          const savedInventory = localStorage.getItem(STORAGE_KEYS.INVENTORY);
+          
+          if (savedInventory) {
+            // Parse and validate the saved data
+            const parsedData = JSON.parse(savedInventory);
+            
+            // Validate that it's an array and has the basic structure
+            if (Array.isArray(parsedData) && parsedData.length > 0) {
+              // Ensure all items have required fields
+              const validatedData = parsedData.map((item: any) => {
+                // Calculate totals if they don't exist
+                const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
+                const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
+                const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
+                const total_weight_rice_kg = (item.sacks_of_rice_25kg * 25) + (item.sacks_of_rice_50kg * 50);
+                
+                const grains_display_condition = item.grains_condition === "others" && item.grains_condition_other 
+                  ? item.grains_condition_other 
+                  : item.grains_condition;
+                
+                const rice_display_condition = item.rice_condition === "others" && item.rice_condition_other 
+                  ? item.rice_condition_other 
+                  : item.rice_condition;
+                
+                return {
+                  ...item,
+                  total_sacks_of_grains,
+                  total_sacks_of_rice,
+                  total_weight_grains_kg,
+                  total_weight_rice_kg,
+                  grains_display_condition,
+                  rice_display_condition,
+                };
+              });
+              
+              const deduplicatedData = deduplicateItems(validatedData);
+              setInventoryData(deduplicatedData);
+              console.log("Loaded inventory from localStorage:", deduplicatedData.length, "items");
+            } else {
+              // If saved data is invalid, start with empty array
+              setInventoryData([]);
+            }
+          } else {
+            // No saved data, start with empty array
+            setInventoryData([]);
+          }
         }
       }
       
@@ -452,6 +468,9 @@ export default function InventoryPage() {
       setInventoryData([]);
       setIsLoading(false);
     }
+    };
+    
+    loadData();
   }, []);
 
   // Load deliveries from backend only when user navigates to deliveries tab
@@ -532,6 +551,52 @@ export default function InventoryPage() {
     }
   };
 
+  // Helper function to deduplicate inventory items by ID
+  const deduplicateItems = (items: InventoryItem[]): InventoryItem[] => {
+    const seen = new Set<number>();
+    return items.filter(item => {
+      if (seen.has(item.id)) {
+        console.warn(`Duplicate inventory item ID detected: ${item.id}, removing duplicate`);
+        return false;
+      }
+      seen.add(item.id);
+      return true;
+    });
+  };
+
+  // Helper to load inventory from backend
+  const loadInventoryFromBackend = async () => {
+    try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) {
+        console.log('No token found, skipping inventory load');
+        return [];
+      }
+
+      const res = await fetch('http://localhost:5001/api/inventory', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        console.error('Error loading inventory');
+        return [];
+      }
+
+      const data = await res.json();
+      if (data.inventory && Array.isArray(data.inventory)) {
+        console.log('Loaded inventory from backend:', data.inventory.length, 'items');
+        return data.inventory;
+      }
+      return [];
+    } catch (e) {
+      console.error('Error loading inventory from backend:', e);
+      return [];
+    }
+  };
+
   // Helper to load deliveries from backend
   const loadDeliveriesFromBackend = async () => {
     try {
@@ -568,10 +633,113 @@ export default function InventoryPage() {
   };
 
   // Helper: update a delivery's status in backend
+  // Helper: subtract inventory when delivery is created
+  const subtractInventoryForDelivery = (delivery: {
+    items: DeliveryLineItem[];
+  }) => {
+    const updatedInventory = inventoryData.map(inventoryItem => {
+      const deliveryItem = delivery.items.find(d => d.variety === inventoryItem.name);
+      
+      if (!deliveryItem) return inventoryItem;
+      
+      // Calculate total kg being delivered
+      const totalKgDelivered = deliveryItem.sacks * deliveryItem.sack_size_kg;
+      
+      let remaining = totalKgDelivered;
+      let new50KgSacks = inventoryItem.sacks_of_rice_50kg;
+      let new25KgSacks = inventoryItem.sacks_of_rice_25kg;
+      
+      // Subtract from the same sack size as the delivery first
+      if (deliveryItem.sack_size_kg === 50) {
+        // Subtract from 50kg sacks first
+        const sacksFrom50 = Math.min(new50KgSacks, deliveryItem.sacks);
+        new50KgSacks -= sacksFrom50;
+        remaining -= sacksFrom50 * 50;
+        
+        // If more needed, subtract from 25kg sacks
+        if (remaining > 0) {
+          const sacksFrom25 = Math.min(new25KgSacks, Math.ceil(remaining / 25));
+          new25KgSacks -= sacksFrom25;
+        }
+      } else { // deliveryItem.sack_size_kg === 25
+        // Subtract from 25kg sacks first
+        const sacksFrom25 = Math.min(new25KgSacks, deliveryItem.sacks);
+        new25KgSacks -= sacksFrom25;
+        remaining -= sacksFrom25 * 25;
+        
+        // If more needed, subtract from 50kg sacks
+        if (remaining > 0) {
+          const sacksFrom50 = Math.min(new50KgSacks, Math.ceil(remaining / 50));
+          new50KgSacks -= sacksFrom50;
+        }
+      }
+      
+      // Calculate new totals
+      const total_sacks_of_rice = new50KgSacks + new25KgSacks;
+      const total_weight_rice_kg = (new25KgSacks * 25) + (new50KgSacks * 50);
+      
+      return {
+        ...inventoryItem,
+        sacks_of_rice_50kg: new50KgSacks,
+        sacks_of_rice_25kg: new25KgSacks,
+        total_sacks_of_rice,
+        total_weight_rice_kg,
+      };
+    });
+    
+    const deduplicatedData = deduplicateItems(updatedInventory);
+    setInventoryData(deduplicatedData);
+  };
+
+  // Helper: add back inventory when delivery is cancelled or returned
+  const restoreInventoryForDelivery = (delivery: DeliveryRecord) => {
+    const updatedInventory = inventoryData.map(inventoryItem => {
+      const deliveryItem = delivery.items.find(d => d.variety === inventoryItem.name);
+      
+      if (!deliveryItem) return inventoryItem;
+      
+      // Add back the same sack size that was delivered
+      let new50KgSacks = inventoryItem.sacks_of_rice_50kg;
+      let new25KgSacks = inventoryItem.sacks_of_rice_25kg;
+      
+      if (deliveryItem.sack_size_kg === 50) {
+        // Add back 50kg sacks
+        new50KgSacks += deliveryItem.sacks;
+      } else { // deliveryItem.sack_size_kg === 25
+        // Add back 25kg sacks
+        new25KgSacks += deliveryItem.sacks;
+      }
+      
+      // Calculate new totals
+      const total_sacks_of_rice = new50KgSacks + new25KgSacks;
+      const total_weight_rice_kg = (new25KgSacks * 25) + (new50KgSacks * 50);
+      
+      return {
+        ...inventoryItem,
+        sacks_of_rice_50kg: new50KgSacks,
+        sacks_of_rice_25kg: new25KgSacks,
+        total_sacks_of_rice,
+        total_weight_rice_kg,
+      };
+    });
+    
+    const deduplicatedData = deduplicateItems(updatedInventory);
+    setInventoryData(deduplicatedData);
+  };
+
   const updateDeliveryStatus = async (deliveryId: number, status: 'to be delivered' | 'delivered' | 'cancelled' | 'returned') => {
     try {
       const token = user?.token || localStorage.getItem('token');
       if (!token) return false;
+
+      // Get the delivery to find out its current status and items
+      const delivery = deliveries.find(d => d.id === deliveryId);
+      if (!delivery) return false;
+
+      // If changing to cancelled or returned, restore inventory
+      if ((status === 'cancelled' || status === 'returned') && delivery.status === 'to be delivered') {
+        restoreInventoryForDelivery(delivery);
+      }
 
       const res = await fetch(`http://localhost:5001/api/deliveries/${deliveryId}`, {
         method: 'PUT',
@@ -772,24 +940,24 @@ export default function InventoryPage() {
         rice_display_condition,
       };
       
-      // Update locally
+      // Save to backend first
+      await saveToBackend(updatedItem);
+      
+      // If successful, update local state
       const updatedInventory = inventoryData.map(item => 
         item.id === selectedInventory.id 
           ? updatedItem
           : item
       );
-      setInventoryData(updatedInventory);
-      
-      // Also try to save to backend (simulated)
-      await saveToBackend(updatedItem);
+      const deduplicatedData = deduplicateItems(updatedInventory);
+      setInventoryData(deduplicatedData);
       
       setIsModalOpen(false);
       alert("Inventory updated successfully!");
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating inventory:", error);
-      setIsModalOpen(false);
-      alert("Inventory updated successfully!");
+      alert(`Error updating inventory: ${error.message || 'Please try again'}`);
     } finally {
       setIsSaving(false);
     }
@@ -801,18 +969,20 @@ export default function InventoryPage() {
     if (!confirm("Are you sure you want to delete this rice variety?")) return;
 
     try {
-      // Delete locally
-      const updatedInventory = inventoryData.filter(item => item.id !== selectedInventory.id);
-      setInventoryData(updatedInventory);
-      
-      // Also try to delete from backend (simulated)
+      // Delete from backend first
       await deleteFromBackend(selectedInventory.id);
       
-      setIsModalOpen(false);
+      // If successful, update local state
+      const updatedInventory = inventoryData.filter(item => item.id !== selectedInventory.id);
+      const deduplicatedData = deduplicateItems(updatedInventory);
+      setInventoryData(deduplicatedData);
       
-    } catch (error) {
-      console.error("Error deleting inventory:", error);
       setIsModalOpen(false);
+      alert("Rice variety deleted successfully!");
+      
+    } catch (error: any) {
+      console.error("Error deleting inventory:", error);
+      alert(`Error deleting rice variety: ${error.message || 'Please try again'}`);
     }
   };
 
@@ -824,6 +994,41 @@ export default function InventoryPage() {
 
     setIsSaving(true);
     try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) {
+        alert('You must be logged in to add inventory items.');
+        return;
+      }
+
+      // Create the item on backend first
+      const response = await fetch('http://localhost:5001/api/inventory', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: newItem.name,
+          price_per_unit: newItem.price,
+          sacks_of_grains_25kg: newItem.sacks_of_grains_25kg,
+          sacks_of_grains_50kg: newItem.sacks_of_grains_50kg,
+          sacks_of_rice_25kg: newItem.sacks_of_rice_25kg,
+          sacks_of_rice_50kg: newItem.sacks_of_rice_50kg,
+          grains_condition: newItem.grains_condition,
+          grains_condition_other: newItem.grains_condition_other,
+          rice_condition: newItem.rice_condition,
+          rice_condition_other: newItem.rice_condition_other,
+          remarks: newItem.remarks,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to add inventory item');
+      }
+
+      const result = await response.json();
+      
       // Calculate totals
       const total_sacks_of_grains = newItem.sacks_of_grains_25kg + newItem.sacks_of_grains_50kg;
       const total_sacks_of_rice = newItem.sacks_of_rice_25kg + newItem.sacks_of_rice_50kg;
@@ -839,14 +1044,9 @@ export default function InventoryPage() {
         ? newItem.rice_condition_other 
         : newItem.rice_condition;
       
-      // Generate new ID (max existing ID + 1)
-      const newId = inventoryData.length > 0 
-        ? Math.max(...inventoryData.map(item => item.id)) + 1 
-        : 1;
-      
-      // Create new inventory item
+      // Create new inventory item with ID from backend (result.item.id)
       const newInventoryItem: InventoryItem = {
-        id: newId,
+        id: result.item.id,
         name: newItem.name,
         price: newItem.price,
         
@@ -873,54 +1073,102 @@ export default function InventoryPage() {
         // Remarks
         remarks: newItem.remarks,
         
-        user_id: 1,
+        user_id: user?.id || 1,
         created_at: new Date().toISOString(),
       };
       
-      // Add locally
+      // Add to local state
       const updatedInventory = [...inventoryData, newInventoryItem];
-      setInventoryData(updatedInventory);
-      
-      // Also try to save to backend (simulated)
-      await saveToBackend(newInventoryItem);
+      const deduplicatedData = deduplicateItems(updatedInventory);
+      setInventoryData(deduplicatedData);
       
       handleCloseAddModal();
       alert("Rice variety added successfully!");
       
     } catch (error: any) {
       console.error("Error adding inventory:", error);
-      alert("Rice variety added successfully!");
+      alert(`Error adding rice variety: ${error.message || 'Please try again'}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Simulated backend save function
+  // Save or update inventory item to backend
   const saveToBackend = async (item: InventoryItem): Promise<void> => {
-    // In a real app, this would make an API call to your backend
-    console.log("Simulating save to backend:", item);
-    
-    // For demo purposes, we'll simulate an API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        console.log("Successfully saved to backend (simulated)");
-        resolve();
-      }, 500);
-    });
+    try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) {
+        console.warn('No token found, skipping backend save');
+        return;
+      }
+
+      // Check if this is an update or create by checking if item exists in backend
+      const isUpdate = inventoryData.some(inv => inv.id === item.id);
+      
+      const url = isUpdate 
+        ? `http://localhost:5001/api/inventory/${item.id}`
+        : 'http://localhost:5001/api/inventory';
+      
+      const method = isUpdate ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: item.name,
+          price_per_unit: item.price,
+          sacks_of_grains_25kg: item.sacks_of_grains_25kg,
+          sacks_of_grains_50kg: item.sacks_of_grains_50kg,
+          sacks_of_rice_25kg: item.sacks_of_rice_25kg,
+          sacks_of_rice_50kg: item.sacks_of_rice_50kg,
+          grains_condition: item.grains_condition,
+          grains_condition_other: item.grains_condition_other,
+          rice_condition: item.rice_condition,
+          rice_condition_other: item.rice_condition_other,
+          remarks: item.remarks,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to save inventory');
+      }
+
+      console.log('Successfully saved to backend');
+    } catch (error) {
+      console.error('Error saving to backend:', error);
+      throw error;
+    }
   };
 
-  // Simulated backend delete function
+  // Delete inventory item from backend
   const deleteFromBackend = async (itemId: number): Promise<void> => {
-    // In a real app, this would make an API call to your backend
-    console.log("Simulating delete from backend:", itemId);
-    
-    // For demo purposes, we'll simulate an API call
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        console.log("Successfully deleted from backend (simulated)");
-        resolve();
-      }, 500);
-    });
+    try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) {
+        throw new Error('You must be logged in to delete inventory items');
+      }
+
+      const response = await fetch(`http://localhost:5001/api/inventory/${itemId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to delete inventory item');
+      }
+
+      console.log('Successfully deleted from backend');
+    } catch (error) {
+      console.error('Error deleting from backend:', error);
+      throw error;
+    }
   };
 
   // Save a delivery record
@@ -938,15 +1186,35 @@ export default function InventoryPage() {
       }
     }
 
+    // Validate that inventory has sufficient quantity
+    for (const [idx, item] of newDelivery.items.entries()) {
+      const inventoryItem = inventoryData.find(inv => inv.name === item.variety);
+      if (!inventoryItem) {
+        alert(`Item #${idx + 1}: "${item.variety}" not found in inventory.`);
+        return;
+      }
+      
+      const requiredKg = item.sacks * item.sack_size_kg;
+      const availableKg = inventoryItem.total_weight_rice_kg;
+      
+      if (requiredKg > availableKg) {
+        alert(`Item #${idx + 1}: "${item.variety}" has insufficient inventory. Required: ${requiredKg} kg, Available: ${availableKg} kg`);
+        return;
+      }
+    }
+
     setIsSavingDelivery(true);
     try {
       const success = await saveDeliveryToBackend(newDelivery);
       if (success) {
+        // Subtract inventory for the delivery items
+        subtractInventoryForDelivery(newDelivery);
+        
         // Reload deliveries from backend
         await loadDeliveriesFromBackend();
         setIsDeliveryModalOpen(false);
         handleCloseDeliveryModal();
-        alert('Delivery saved successfully!');
+        alert('Delivery saved successfully! Inventory has been updated.');
       }
     } catch (e) {
       console.error('Error saving delivery:', e);
@@ -1013,8 +1281,9 @@ export default function InventoryPage() {
   // Function to reset to default data (for testing)
   const resetToDefaultData = () => {
     if (confirm("Are you sure you want to reset all inventory data to default? This cannot be undone.")) {
-      setInventoryData(DEFAULT_SAMPLE_INVENTORY);
-      saveToLocalStorage(DEFAULT_SAMPLE_INVENTORY);
+      const deduplicatedData = deduplicateItems(DEFAULT_SAMPLE_INVENTORY);
+      setInventoryData(deduplicatedData);
+      saveToLocalStorage(deduplicatedData);
       alert("Inventory reset to default data.");
     }
   };
@@ -2218,33 +2487,6 @@ export default function InventoryPage() {
                           {totals.total_weight_rice_kg.toLocaleString()} kg
                         </span>
                       </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">Method *</label>
-                      <select
-                        value={newDelivery.method}
-                        onChange={(e) => setNewDelivery(prev => ({ ...prev, method: e.target.value as 'delivery' | 'pick-up' }))}
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      >
-                        <option value="delivery">Delivery</option>
-                        <option value="pick-up">Pick-up</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">Status *</label>
-                      <select
-                        value={newDelivery.status}
-                        onChange={(e) => setNewDelivery(prev => ({ ...prev, status: e.target.value as 'to be delivered' | 'delivered' | 'cancelled' | 'returned' }))}
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                      >
-                        <option value="to be delivered">To be delivered</option>
-                        <option value="delivered">Delivered</option>
-                        <option value="cancelled">Cancelled</option>
-                        <option value="returned">Returned</option>
-                      </select>
-                    </div>
-                  </div>
-
                     </div>
                   </div>
                 </div>

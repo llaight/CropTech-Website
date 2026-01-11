@@ -133,6 +133,21 @@ def create_tables():
                    )       
             """)
     
+    # Add missing columns to inventory table if they don't exist
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS price_per_unit FLOAT DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_grains_25kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_grains_50kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_rice_25kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_rice_50kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_condition TEXT DEFAULT 'to sell';")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_condition_other TEXT;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS rice_condition TEXT DEFAULT 'to sell';")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS rice_condition_other TEXT;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS remarks TEXT;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS type TEXT;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS user_id INTEGER;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+    
     # crops table
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS crops(
