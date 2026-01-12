@@ -3,8 +3,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-# Load .env if present. If not, try .env.example in the repository root so
-# users who only have the example file still get reasonable defaults.
+# Load .env if present. If not, try .env.example in the repository root
 loaded = load_dotenv()
 env_example = Path(__file__).resolve().parents[1] / '.env.example'
 if not loaded and env_example.exists():
@@ -25,8 +24,7 @@ def get_connection():
                         print("Missing one or more required DB environment variables (DB_HOST, DB_PORT, DB_NAME, DB_USER).")
 
                 if not db_password:
-                        print("DB_PASSWORD not set — psycopg2 will fail to authenticate without a password.\n"
-                                  "Make sure you have a .env file or set the DB_PASSWORD environment variable.")
+                        print("DB_PASSWORD not set — psycopg2 will fail to authenticate without a password.")
 
                 conn = psycopg2.connect(
                         host=db_host,
@@ -118,11 +116,15 @@ def create_tables():
                    sacks_of_rice_25kg INTEGER DEFAULT 0,
                    sacks_of_rice_50kg INTEGER DEFAULT 0,
                    
-                   -- Condition categories with "others" option
-                   grains_condition TEXT DEFAULT 'to sell',
+                   -- Condition categories - UPDATED: Removed "others" option
+                   grains_condition TEXT DEFAULT 'to store' CHECK (grains_condition IN ('to store', 'to plant', 'to dispose')),
                    grains_condition_other TEXT,
-                   rice_condition TEXT DEFAULT 'to sell',
+                   rice_condition TEXT DEFAULT 'to store' CHECK (rice_condition IN ('to store', 'to sell', 'to dispose')),
                    rice_condition_other TEXT,
+                   
+                   -- Planting specific - UPDATED: Now have separate counts for 25kg and 50kg
+                   grains_to_plant_sacks_25kg INTEGER DEFAULT 0,
+                   grains_to_plant_sacks_50kg INTEGER DEFAULT 0,
                    
                    -- General remarks/notes
                    remarks TEXT,

@@ -177,11 +177,7 @@ def login():
 # -------------------------
 @bp.route("/users", methods=["GET"])
 def list_users():
-    """Return a list of registered users (omits password).
-
-    WARNING: This endpoint is intended for local development and debugging only.
-    Do NOT expose it in production without proper authentication and authorization.
-    """
+    """Return a list of registered users (omits password)."""
     conn = get_connection()
     if conn is None:
         return jsonify({"message": "Database connection not available"}), 500
@@ -193,7 +189,6 @@ def list_users():
         users = []
         for row in rows:
             user_id, name, email, role, created_at = row
-            # Convert created_at to ISO string if it's a datetime
             try:
                 created_iso = created_at.isoformat()
             except Exception:
@@ -252,10 +247,14 @@ def create_inventory_item():
     sacks_of_rice_50kg = data.get("sacks_of_rice_50kg", 0)
     
     # Condition categories
-    grains_condition = data.get("grains_condition", "to sell")
+    grains_condition = data.get("grains_condition", "to store")
     grains_condition_other = data.get("grains_condition_other", "")
-    rice_condition = data.get("rice_condition", "to sell")
+    rice_condition = data.get("rice_condition", "to store")
     rice_condition_other = data.get("rice_condition_other", "")
+    
+    # Planting - UPDATED: Now have separate counts for 25kg and 50kg
+    grains_to_plant_sacks_25kg = data.get("grains_to_plant_sacks_25kg", 0)
+    grains_to_plant_sacks_50kg = data.get("grains_to_plant_sacks_50kg", 0)
     
     # Remarks
     remarks = data.get("remarks", "")
@@ -275,8 +274,9 @@ def create_inventory_item():
                 sacks_of_rice_25kg, sacks_of_rice_50kg,
                 grains_condition, grains_condition_other,
                 rice_condition, rice_condition_other,
+                grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
                 remarks, type, user_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING item_id, created_at;
         """, (
             name, price_per_unit,
@@ -284,6 +284,7 @@ def create_inventory_item():
             sacks_of_rice_25kg, sacks_of_rice_50kg,
             grains_condition, grains_condition_other,
             rice_condition, rice_condition_other,
+            grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
             remarks, type_val, user_id
         ))
         
@@ -341,6 +342,10 @@ def create_inventory_item():
             "rice_condition": rice_condition,
             "rice_condition_other": rice_condition_other,
             
+            # Planting - UPDATED: Separate counts for 25kg and 50kg
+            "grains_to_plant_sacks_25kg": grains_to_plant_sacks_25kg,
+            "grains_to_plant_sacks_50kg": grains_to_plant_sacks_50kg,
+            
             # Remarks
             "remarks": remarks,
             
@@ -384,6 +389,7 @@ def list_inventory():
                     sacks_of_rice_25kg, sacks_of_rice_50kg,
                     grains_condition, grains_condition_other,
                     rice_condition, rice_condition_other,
+                    grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
                     remarks, type, user_id, created_at 
                 FROM inventory 
                 WHERE user_id=%s 
@@ -397,6 +403,7 @@ def list_inventory():
                     sacks_of_rice_25kg, sacks_of_rice_50kg,
                     grains_condition, grains_condition_other,
                     rice_condition, rice_condition_other,
+                    grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
                     remarks, type, user_id, created_at 
                 FROM inventory 
                 ORDER BY created_at DESC;
@@ -411,6 +418,7 @@ def list_inventory():
              sacks_of_rice_25kg, sacks_of_rice_50kg,
              grains_condition, grains_condition_other,
              rice_condition, rice_condition_other,
+             grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
              remarks, type_val, uid, created_at) = row
             
             # Convert created_at to ISO string
@@ -427,12 +435,7 @@ def list_inventory():
             
             # Determine display condition
             grains_display_condition = grains_condition
-            if grains_condition == "others" and grains_condition_other:
-                grains_display_condition = grains_condition_other
-            
             rice_display_condition = rice_condition
-            if rice_condition == "others" and rice_condition_other:
-                rice_display_condition = rice_condition_other
             
             inventory_items.append({
                 "id": item_id,
@@ -458,6 +461,10 @@ def list_inventory():
                 "rice_condition": rice_condition,
                 "rice_condition_other": rice_condition_other,
                 "rice_display_condition": rice_display_condition,
+                
+                # Planting - UPDATED: Separate counts for 25kg and 50kg
+                "grains_to_plant_sacks_25kg": grains_to_plant_sacks_25kg,
+                "grains_to_plant_sacks_50kg": grains_to_plant_sacks_50kg,
                 
                 # Remarks
                 "remarks": remarks,
@@ -549,6 +556,15 @@ def update_inventory_item(item_id):
             updates.append("rice_condition_other = %s")
             values.append(data["rice_condition_other"])
         
+        # Planting - UPDATED: Now have separate counts for 25kg and 50kg
+        if "grains_to_plant_sacks_25kg" in data:
+            updates.append("grains_to_plant_sacks_25kg = %s")
+            values.append(data["grains_to_plant_sacks_25kg"])
+        
+        if "grains_to_plant_sacks_50kg" in data:
+            updates.append("grains_to_plant_sacks_50kg = %s")
+            values.append(data["grains_to_plant_sacks_50kg"])
+        
         # Remarks
         if "remarks" in data:
             updates.append("remarks = %s")
@@ -578,6 +594,7 @@ def update_inventory_item(item_id):
                  sacks_of_rice_25kg, sacks_of_rice_50kg,
                  grains_condition, grains_condition_other,
                  rice_condition, rice_condition_other,
+                 grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
                  remarks, type_val, uid, created_at) = updated_row
                 
                 # Calculate totals
@@ -615,6 +632,10 @@ def update_inventory_item(item_id):
                         "grains_condition_other": grains_condition_other,
                         "rice_condition": rice_condition,
                         "rice_condition_other": rice_condition_other,
+                        
+                        # Planting - UPDATED: Separate counts for 25kg and 50kg
+                        "grains_to_plant_sacks_25kg": grains_to_plant_sacks_25kg,
+                        "grains_to_plant_sacks_50kg": grains_to_plant_sacks_50kg,
                         
                         # Remarks
                         "remarks": remarks,
