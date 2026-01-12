@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import Image from "next/image";
 
 // Import your local PNG files
@@ -16,18 +16,59 @@ interface Props {
   onHarvestDateChange?: (date: string) => void;
 }
 
+// Typhoon interface
+interface TyphoonData {
+  name: string;
+  signalWarning: string;
+  rainfallWarning: string;
+  duration: string;
+  durationUnit: 'days' | 'weeks';
+  isStartDate?: boolean;
+  typhoonId?: string;
+  note?: string;
+}
+
+interface EventData {
+  watered?: boolean;
+  fertilizer?: boolean;
+  pesticide?: boolean;
+  typhoon?: boolean;
+  typhoonData?: TyphoonData;
+  note?: string;
+}
+
 export default function PlantingCalendar({ fieldId, initialPlantingDate, initialHarvestDate, onPlantingDateChange, onHarvestDateChange }: Props) {
   const storageKey = `field-${fieldId}-dates`;
   const eventsKey = `field-${fieldId}-events`;
+  
   const [plantingDate, setPlantingDate] = useState<string>(initialPlantingDate ?? "");
   const [harvestDate, setHarvestDate] = useState<string>(initialHarvestDate ?? "");
-  const [events, setEvents] = useState<Record<string, { watered?: boolean; fertilizer?: boolean; pesticide?: boolean; typhoon?: boolean; note?: string }>>({});
+  const [events, setEvents] = useState<Record<string, EventData>>({});
+  
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [typhoonForm, setTyphoonForm] = useState<TyphoonData>({
+    name: "",
+    signalWarning: "none",
+    rainfallWarning: "none",
+    duration: "1",
+    durationUnit: "days",
+    isStartDate: true
+  });
 
-  // Load dates and events on component mount
+  // Use ref to track loading state
+  const initialLoadDone = useRef(false);
+
+  // Generate unique typhoon ID
+  const generateTyphoonId = useCallback(() => `typhoon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, []);
+
+  // Load dates and events on component mount - ONLY ONCE
   useEffect(() => {
+    if (initialLoadDone.current) return;
+    
     try {
+      console.log("Loading calendar data...");
+      
       // Load dates
       const rawDates = localStorage.getItem(storageKey);
       if (rawDates) {
@@ -39,11 +80,22 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
         setHarvestDate(initialHarvestDate ?? "");
       }
 
-      // Load events
+      // Load events - combine both regular events and typhoon data
       const rawEvents = localStorage.getItem(eventsKey);
+      let loadedEvents: Record<string, EventData> = {};
+      
       if (rawEvents) {
-        setEvents(JSON.parse(rawEvents));
+        try {
+          loadedEvents = JSON.parse(rawEvents);
+          console.log("Loaded events from storage:", Object.keys(loadedEvents).length);
+        } catch (e) {
+          console.error("Error parsing events:", e);
+        }
       }
+      
+      setEvents(loadedEvents);
+      initialLoadDone.current = true;
+      
     } catch (e) {
       console.error("Error loading from localStorage:", e);
     } finally {
@@ -73,9 +125,10 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
 
   // Save events when they change
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !initialLoadDone.current) return;
     
     try {
+      console.log("Saving events to storage:", Object.keys(events).length);
       localStorage.setItem(eventsKey, JSON.stringify(events));
     } catch (e) {
       console.error("Error saving events to localStorage:", e);
@@ -92,12 +145,17 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
     }
   }
 
-  function formatDateKey(d: Date) {
+  const formatDateKey = useCallback((d: Date) => {
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
-  }
+  }, []);
+
+  const getDateFromKey = useCallback((dateKey: string): Date => {
+    const [year, month, day] = dateKey.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }, []);
 
   function getMonthsBetween(start: Date, end: Date) {
     const months = [] as { year: number; month: number }[];
@@ -126,25 +184,341 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
   const [visibleMonthIndex, setVisibleMonthIndex] = useState<number>(0);
   useEffect(() => setVisibleMonthIndex(0), [plantingDate, calendarRanges.length]);
 
-  function toggleEventForDate(dateKey: string, key: 'watered' | 'fertilizer' | 'pesticide' | 'typhoon') {
-    setEvents(prev => {
-      const prevEntry = prev[dateKey] ?? {};
-      const updated = { ...prev, [dateKey]: { ...prevEntry, [key]: !prevEntry[key as keyof typeof prevEntry] } };
-      return updated;
-    });
-  }
+  // Find start date for a typhoon
+  const findTyphoonStartDate = useCallback((typhoonId: string): string | null => {
+    for (const [dateKey, event] of Object.entries(events)) {
+      if (event.typhoonData?.typhoonId === typhoonId && event.typhoonData.isStartDate) {
+        return dateKey;
+      }
+    }
+    return null;
+  }, [events]);
 
-  function saveNoteForDate(dateKey: string, note: string) {
-    setEvents(prev => ({ ...prev, [dateKey]: { ...(prev[dateKey] ?? {}), note } }));
-  }
+  // Find typhoon data for a date
+  const getTyphoonDataForDate = useCallback((dateKey: string): TyphoonData | null => {
+    return events[dateKey]?.typhoonData || null;
+  }, [events]);
+
+  // Check if date is part of a typhoon
+  const isDateInTyphoon = useCallback((dateKey: string): boolean => {
+    return !!events[dateKey]?.typhoon;
+  }, [events]);
+
+  // Get day number in typhoon (e.g., "2nd day")
+  const getTyphoonDayNumber = useCallback((dateKey: string): string | null => {
+    const typhoonData = events[dateKey]?.typhoonData;
+    if (!typhoonData || !typhoonData.typhoonId) return null;
+    
+    const startDateKey = findTyphoonStartDate(typhoonData.typhoonId);
+    if (!startDateKey) return null;
+    
+    const startDate = getDateFromKey(startDateKey);
+    const checkDate = getDateFromKey(dateKey);
+    const diffTime = checkDate.getTime() - startDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    
+    if (diffDays <= 0) return null;
+    
+    // Format as ordinal (1st, 2nd, 3rd, etc.)
+    const suffixes = ["th", "st", "nd", "rd"];
+    const v = diffDays % 100;
+    return diffDays + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
+  }, [events, findTyphoonStartDate, getDateFromKey]);
+
+  // Create new typhoon
+  const createNewTyphoon = useCallback((dateKey: string, data: TyphoonData) => {
+    const typhoonId = generateTyphoonId();
+    const duration = parseInt(data.duration) || 1;
+    const startDate = getDateFromKey(dateKey);
+    
+    const newEvents = { ...events };
+    
+    // Add start date
+    newEvents[dateKey] = {
+      ...(newEvents[dateKey] || {}),
+      typhoon: true,
+      typhoonData: {
+        ...data,
+        isStartDate: true,
+        typhoonId
+      }
+    };
+    
+    // Add duration days
+    for (let i = 1; i < duration; i++) {
+      const nextDate = new Date(startDate);
+      nextDate.setDate(nextDate.getDate() + i);
+      const nextDateKey = formatDateKey(nextDate);
+      
+      newEvents[nextDateKey] = {
+        ...(newEvents[nextDateKey] || {}),
+        typhoon: true,
+        typhoonData: {
+          ...data,
+          isStartDate: false,
+          typhoonId
+        }
+      };
+    }
+    
+    return newEvents;
+  }, [events, generateTyphoonId, formatDateKey, getDateFromKey]);
+
+  // Update existing typhoon
+  const updateTyphoon = useCallback((dateKey: string, data: TyphoonData) => {
+    const currentData = events[dateKey]?.typhoonData;
+    if (!currentData || !currentData.typhoonId) return events;
+    
+    const typhoonId = currentData.typhoonId;
+    const startDateKey = findTyphoonStartDate(typhoonId);
+    if (!startDateKey) return events;
+    
+    const oldDuration = parseInt(currentData.duration) || 1;
+    const newDuration = parseInt(data.duration) || 1;
+    const startDate = getDateFromKey(startDateKey);
+    
+    const newEvents = { ...events };
+    
+    // Update start date if this is it
+    if (dateKey === startDateKey) {
+      newEvents[dateKey] = {
+        ...newEvents[dateKey],
+        typhoonData: {
+          ...data,
+          isStartDate: true,
+          typhoonId
+        }
+      };
+      
+      // Remove old duration days if duration decreased
+      if (newDuration < oldDuration) {
+        for (let i = newDuration; i < oldDuration; i++) {
+          const targetDate = new Date(startDate);
+          targetDate.setDate(targetDate.getDate() + i);
+          const targetDateKey = formatDateKey(targetDate);
+          
+          if (newEvents[targetDateKey]) {
+            const { typhoonData, typhoon, ...rest } = newEvents[targetDateKey];
+            if (Object.keys(rest).length > 0) {
+              newEvents[targetDateKey] = rest;
+            } else {
+              delete newEvents[targetDateKey];
+            }
+          }
+        }
+      }
+      
+      // Add/update new duration days
+      for (let i = 1; i < newDuration; i++) {
+        const nextDate = new Date(startDate);
+        nextDate.setDate(nextDate.getDate() + i);
+        const nextDateKey = formatDateKey(nextDate);
+        
+        newEvents[nextDateKey] = {
+          ...(newEvents[nextDateKey] || {}),
+          typhoon: true,
+          typhoonData: {
+            ...data,
+            isStartDate: false,
+            typhoonId
+          }
+        };
+      }
+    } else {
+      // Update just this day
+      newEvents[dateKey] = {
+        ...newEvents[dateKey],
+        typhoonData: {
+          ...currentData,
+          signalWarning: data.signalWarning,
+          rainfallWarning: data.rainfallWarning,
+          isStartDate: false,
+          typhoonId
+        }
+      };
+    }
+    
+    return newEvents;
+  }, [events, findTyphoonStartDate, formatDateKey, getDateFromKey]);
+
+  // Remove typhoon
+  const removeTyphoon = useCallback((dateKey: string) => {
+    const currentData = events[dateKey]?.typhoonData;
+    if (!currentData || !currentData.typhoonId) return events;
+    
+    const typhoonId = currentData.typhoonId;
+    const startDateKey = findTyphoonStartDate(typhoonId);
+    
+    const newEvents = { ...events };
+    
+    if (dateKey === startDateKey) {
+      // Remove entire typhoon
+      const duration = parseInt(currentData.duration) || 1;
+      const startDate = getDateFromKey(dateKey);
+      
+      for (let i = 0; i < duration; i++) {
+        const targetDate = new Date(startDate);
+        targetDate.setDate(targetDate.getDate() + i);
+        const targetDateKey = formatDateKey(targetDate);
+        
+        if (newEvents[targetDateKey]) {
+          const { typhoonData, typhoon, ...rest } = newEvents[targetDateKey];
+          if (Object.keys(rest).length > 0) {
+            newEvents[targetDateKey] = rest;
+          } else {
+            delete newEvents[targetDateKey];
+          }
+        }
+      }
+    } else {
+      // Remove just this day from typhoon
+      const { typhoonData, typhoon, ...rest } = newEvents[dateKey];
+      if (Object.keys(rest).length > 0) {
+        newEvents[dateKey] = rest;
+      } else {
+        delete newEvents[dateKey];
+      }
+    }
+    
+    return newEvents;
+  }, [events, findTyphoonStartDate, formatDateKey, getDateFromKey]);
+
+  // Toggle events
+  const toggleEventForDate = useCallback((dateKey: string, key: 'watered' | 'fertilizer' | 'pesticide' | 'typhoon') => {
+    setEvents(prev => {
+      const prevEntry = prev[dateKey] || {};
+      
+      if (key === 'typhoon') {
+        if (!prevEntry.typhoon) {
+          // Adding typhoon - check if part of existing typhoon
+          const existingTyphoonData = Object.values(prev).find(event => 
+            event.typhoonData?.typhoonId && 
+            event.typhoonData.isStartDate
+          )?.typhoonData;
+          
+          if (existingTyphoonData) {
+            // Check if this date is within existing typhoon duration
+            const startDateKey = findTyphoonStartDate(existingTyphoonData.typhoonId!);
+            if (startDateKey) {
+              const startDate = getDateFromKey(startDateKey);
+              const checkDate = getDateFromKey(dateKey);
+              const diffTime = checkDate.getTime() - startDate.getTime();
+              const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+              
+              if (diffDays >= 0 && diffDays < parseInt(existingTyphoonData.duration || "1")) {
+                // Date is within existing typhoon duration
+                return {
+                  ...prev,
+                  [dateKey]: {
+                    ...prevEntry,
+                    typhoon: true,
+                    typhoonData: {
+                      ...existingTyphoonData,
+                      isStartDate: dateKey === startDateKey
+                    }
+                  }
+                };
+              }
+            }
+          }
+          
+          // Create new typhoon
+          const newEvents = createNewTyphoon(dateKey, {
+            ...typhoonForm,
+            isStartDate: true
+          });
+          return newEvents;
+        } else {
+          // Removing typhoon
+          return removeTyphoon(dateKey);
+        }
+      } else {
+        // Other events
+        return {
+          ...prev,
+          [dateKey]: {
+            ...prevEntry,
+            [key]: !prevEntry[key]
+          }
+        };
+      }
+    });
+  }, [typhoonForm, createNewTyphoon, removeTyphoon, findTyphoonStartDate, getDateFromKey]);
+
+  // Save typhoon data
+  const saveTyphoonDataForDate = useCallback((dateKey: string, data: TyphoonData) => {
+    setEvents(prev => {
+      const currentData = prev[dateKey]?.typhoonData;
+      
+      if (!currentData) {
+        // Create new typhoon
+        return createNewTyphoon(dateKey, data);
+      } else {
+        // Update existing typhoon
+        return updateTyphoon(dateKey, data);
+      }
+    });
+  }, [createNewTyphoon, updateTyphoon]);
+
+  // Handle date click
+  const handleDateClick = useCallback((dateKey: string) => {
+    const eventData = events[dateKey];
+    const typhoonData = eventData?.typhoonData;
+    
+    if (typhoonData) {
+      setTyphoonForm({
+        name: typhoonData.name || "",
+        signalWarning: typhoonData.signalWarning || "none",
+        rainfallWarning: typhoonData.rainfallWarning || "none",
+        duration: typhoonData.duration || "1",
+        durationUnit: typhoonData.durationUnit || "days",
+        isStartDate: typhoonData.isStartDate || false,
+        typhoonId: typhoonData.typhoonId
+      });
+    } else {
+      setTyphoonForm({
+        name: "",
+        signalWarning: "none",
+        rainfallWarning: "none",
+        duration: "1",
+        durationUnit: "days",
+        isStartDate: true
+      });
+    }
+    
+    setSelectedDate(dateKey);
+  }, [events]);
+
+  const saveNoteForDate = useCallback((dateKey: string, note: string) => {
+    setEvents(prev => ({
+      ...prev,
+      [dateKey]: {
+        ...(prev[dateKey] || {}),
+        note
+      }
+    }));
+  }, []);
 
   function exportEventsCSV() {
     try {
-      const header = ['date', 'watered', 'fertilizer', 'pesticide', 'typhoon', 'note'];
+      const header = ['date', 'watered', 'fertilizer', 'pesticide', 'typhoon', 'typhoon_name', 'signal_warning', 'rainfall_warning', 'duration', 'duration_unit', 'note'];
       const keys = Object.keys(events).sort();
       const rows = [header, ...keys.map(k => {
-        const e = events[k] ?? {};
-        return [k, e.watered ? '1' : '0', e.fertilizer ? '1' : '0', e.pesticide ? '1' : '0', e.typhoon ? '1' : '0', e.note ? String(e.note) : ''];
+        const e = events[k] || {};
+        const typhoonData = e.typhoonData;
+        return [
+          k, 
+          e.watered ? '1' : '0', 
+          e.fertilizer ? '1' : '0', 
+          e.pesticide ? '1' : '0', 
+          e.typhoon ? '1' : '0',
+          typhoonData?.name || '',
+          typhoonData?.signalWarning || '',
+          typhoonData?.rainfallWarning || '',
+          typhoonData?.duration || '',
+          typhoonData?.durationUnit || '',
+          e.note ? String(e.note) : ''
+        ];
       })];
       const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -165,7 +539,7 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
     if (!confirm('Clear all recorded events for this field? This cannot be undone.')) return;
     setEvents({});
     try { 
-      localStorage.removeItem(eventsKey); 
+      localStorage.removeItem(eventsKey);
     } catch (e) {
       console.error("Error clearing events:", e);
     }
@@ -181,10 +555,25 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
     return diff;
   }
 
+  // Get typhoon warning color
+  const getTyphoonWarningColor = useCallback((signalWarning: string, rainfallWarning: string): string => {
+    if (signalWarning === "5" || rainfallWarning === "red") return "bg-red-100 ring-2 ring-red-400";
+    if (signalWarning === "4" || rainfallWarning === "orange") return "bg-orange-100 ring-2 ring-orange-400";
+    if (signalWarning === "3" || rainfallWarning === "yellow") return "bg-yellow-100 ring-2 ring-yellow-400";
+    if (signalWarning === "2") return "bg-amber-50 ring-2 ring-amber-300";
+    if (signalWarning === "1") return "bg-blue-50 ring-2 ring-blue-300";
+    return "bg-yellow-50 ring-2 ring-yellow-300";
+  }, []);
+
   const diffDays = daysBetween(plantingDate, harvestDate);
 
+  // Check if date is start of typhoon
+  const isStartDateOfTyphoon = useCallback((dateKey: string): boolean => {
+    return events[dateKey]?.typhoonData?.isStartDate || false;
+  }, [events]);
+
   return (
-      <div className="mt-6 bg-white/80 p-6 rounded-xl shadow">
+    <div className="mt-6 bg-white/80 p-6 rounded-xl shadow">
       <h3 className="text-lg font-semibold mb-3">Planting & Harvest</h3>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -331,70 +720,95 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                       const day = i + 1;
                       const date = new Date(year, month, day);
                       const key = formatDateKey(date);
-                      const e = events[key];
+                      const e = events[key] || {};
                       const isPlanting = plantingDate === key;
                       const isHarvest = harvestDate === key;
-                      const hasTyphoon = e?.typhoon;
+                      const hasTyphoon = e.typhoon;
+                      const typhoonData = e.typhoonData;
+                      const typhoonDayNumber = getTyphoonDayNumber(key);
+                      const isStartDate = isStartDateOfTyphoon(key);
+                      
                       const highlightClass = hasTyphoon 
-                        ? 'bg-red-100 ring-2 ring-red-400' 
+                        ? getTyphoonWarningColor(typhoonData?.signalWarning || "none", typhoonData?.rainfallWarning || "none")
                         : isPlanting || isHarvest 
                         ? 'bg-green-200/80 ring-2 ring-green-400' 
                         : '';
+                      
+                      // Count active events for layout
+                      const activeEvents = [
+                        e.watered,
+                        e.fertilizer,
+                        e.pesticide,
+                        hasTyphoon
+                      ].filter(Boolean).length;
+                      
+                      // Determine icon layout based on number of active events
+                      const iconContainerClass = activeEvents > 2 
+                        ? "flex flex-wrap justify-end gap-0.5" 
+                        : "flex items-center justify-end gap-1";
+                      
                       return (
                         <button
                           key={key}
                           type="button"
-                          onClick={() => setSelectedDate(key)}
-                          className={`h-14 p-1 border rounded-md text-left hover:bg-slate-50 ${selectedDate === key ? 'ring-2 ring-green-300' : ''} ${highlightClass}`}
+                          onClick={() => handleDateClick(key)}
+                          className={`h-16 p-1 border rounded-md text-left hover:bg-slate-50 ${selectedDate === key ? 'ring-2 ring-green-300' : ''} ${highlightClass}`}
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="text-sm">{day}</div>
-                            <div className="flex items-center gap-1">
-                              {e?.watered && (
-                                <div className="w-5 h-5 flex items-center justify-center">
-                                  <Image 
-                                    src={waterIcon}
-                                    alt="Watered" 
-                                    width={16} 
-                                    height={16} 
-                                    className="w-4 h-4"
-                                  />
-                                </div>
-                              )}
-                              {e?.fertilizer && (
-                                <div className="w-5 h-5 flex items-center justify-center">
-                                  <Image 
-                                    src={fertilizerIcon}
-                                    alt="Fertilizer" 
-                                    width={16} 
-                                    height={16} 
-                                    className="w-4 h-4"
-                                  />
-                                </div>
-                              )}
-                              {e?.pesticide && (
-                                <div className="w-5 h-5 flex items-center justify-center">
-                                  <Image 
-                                    src={pesticideIcon}
-                                    alt="Pesticide" 
-                                    width={16} 
-                                    height={16} 
-                                    className="w-4 h-4"
-                                  />
-                                </div>
-                              )}
-                              {e?.typhoon && (
-                                <div className="w-5 h-5 flex items-center justify-center">
-                                  <Image 
-                                    src={typhoonIcon}
-                                    alt="Typhoon" 
-                                    width={16} 
-                                    height={16} 
-                                    className="w-4 h-4"
-                                  />
-                                </div>
-                              )}
+                          <div className="flex flex-col h-full justify-between">
+                            <div className="flex justify-between">
+                              <div className="text-sm font-medium">{day}</div>
+                              <div className={`${iconContainerClass} w-16`}>
+                                {e.watered && (
+                                  <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                    <Image 
+                                      src={waterIcon}
+                                      alt="Watered" 
+                                      width={12} 
+                                      height={12} 
+                                      className="w-3 h-3"
+                                    />
+                                  </div>
+                                )}
+                                {e.fertilizer && (
+                                  <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                    <Image 
+                                      src={fertilizerIcon}
+                                      alt="Fertilizer" 
+                                      width={12} 
+                                      height={12} 
+                                      className="w-3 h-3"
+                                    />
+                                  </div>
+                                )}
+                                {e.pesticide && (
+                                  <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                    <Image 
+                                      src={pesticideIcon}
+                                      alt="Pesticide" 
+                                      width={12} 
+                                      height={12} 
+                                      className="w-3 h-3"
+                                    />
+                                  </div>
+                                )}
+                                {hasTyphoon && (
+                                  <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                    <Image 
+                                      src={typhoonIcon}
+                                      alt="Typhoon" 
+                                      width={12} 
+                                      height={12} 
+                                      className="w-3 h-3"
+                                    />
+                                  </div>
+                                )}
+                              </div>
                             </div>
+                            {typhoonDayNumber && (
+                              <div className="text-xs text-center font-medium text-slate-700 mt-1">
+                                Day {typhoonDayNumber} {isStartDate && "★"}
+                              </div>
+                            )}
                           </div>
                         </button>
                       );
@@ -409,26 +823,159 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
               <div className="mt-4 p-4 border rounded-md bg-white">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-medium">Edit events for {selectedDate}</div>
-                  <div className="text-sm text-slate-500">{new Date(selectedDate).toLocaleDateString()}</div>
+                  <div className="text-sm text-slate-500">
+                    {new Date(selectedDate).toLocaleDateString()}
+                    {getTyphoonDayNumber(selectedDate) && (
+                      <span className="ml-2 font-medium text-yellow-700">
+                        ({getTyphoonDayNumber(selectedDate)} of typhoon{isStartDateOfTyphoon(selectedDate) && " - Start Date"})
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
                   <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={!!events[selectedDate]?.watered} onChange={() => toggleEventForDate(selectedDate, 'watered')} />
+                    <input 
+                      type="checkbox" 
+                      checked={!!events[selectedDate]?.watered} 
+                      onChange={() => toggleEventForDate(selectedDate, 'watered')} 
+                    />
                     <span className="text-sm">Watered</span>
                   </label>
                   <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={!!events[selectedDate]?.fertilizer} onChange={() => toggleEventForDate(selectedDate, 'fertilizer')} />
+                    <input 
+                      type="checkbox" 
+                      checked={!!events[selectedDate]?.fertilizer} 
+                      onChange={() => toggleEventForDate(selectedDate, 'fertilizer')} 
+                    />
                     <span className="text-sm">Fertilizer</span>
                   </label>
                   <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={!!events[selectedDate]?.pesticide} onChange={() => toggleEventForDate(selectedDate, 'pesticide')} />
+                    <input 
+                      type="checkbox" 
+                      checked={!!events[selectedDate]?.pesticide} 
+                      onChange={() => toggleEventForDate(selectedDate, 'pesticide')} 
+                    />
                     <span className="text-sm">Pesticide</span>
                   </label>
                   <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={!!events[selectedDate]?.typhoon} onChange={() => toggleEventForDate(selectedDate, 'typhoon')} />
+                    <input 
+                      type="checkbox" 
+                      checked={!!events[selectedDate]?.typhoon} 
+                      onChange={() => toggleEventForDate(selectedDate, 'typhoon')} 
+                    />
                     <span className="text-sm">Typhoon</span>
                   </label>
                 </div>
+
+                {/* Typhoon details form - only show if typhoon is checked */}
+                {events[selectedDate]?.typhoon && (
+                  <div className="mb-3 p-3 border border-yellow-200 rounded-md bg-yellow-50">
+                    <h5 className="font-medium text-sm mb-2 text-yellow-800">
+                      Typhoon Details {getTyphoonDayNumber(selectedDate) && `- Day ${getTyphoonDayNumber(selectedDate)}`}
+                      {isStartDateOfTyphoon(selectedDate) && " (Start Date ★)"}
+                    </h5>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {typhoonForm.isStartDate ? (
+                        <>
+                          <div>
+                            <label className="block text-xs text-slate-600 mb-1">Typhoon Name *</label>
+                            <input
+                              type="text"
+                              value={typhoonForm.name}
+                              onChange={(e) => setTyphoonForm(prev => ({ ...prev, name: e.target.value }))}
+                              className="w-full px-2 py-1 border rounded text-sm"
+                              placeholder="Enter typhoon name"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-xs text-slate-600 mb-1">Duration *</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={typhoonForm.duration}
+                                onChange={(e) => setTyphoonForm(prev => ({ ...prev, duration: e.target.value }))}
+                                className="w-full px-2 py-1 border rounded text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-slate-600 mb-1">Unit *</label>
+                              <select
+                                value={typhoonForm.durationUnit}
+                                onChange={(e) => setTyphoonForm(prev => ({ ...prev, durationUnit: e.target.value as 'days' | 'weeks' }))}
+                                className="w-full px-2 py-1 border rounded text-sm"
+                              >
+                                <option value="days">Days</option>
+                                <option value="weeks">Weeks</option>
+                              </select>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="md:col-span-2">
+                          <p className="text-xs text-slate-600 mb-2">
+                            <span className="font-medium">Typhoon:</span> {typhoonForm.name || "Unnamed"} 
+                            <span className="ml-2 font-medium">Duration:</span> {typhoonForm.duration} {typhoonForm.durationUnit}
+                          </p>
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">Signal Warning</label>
+                        <select
+                          value={typhoonForm.signalWarning}
+                          onChange={(e) => setTyphoonForm(prev => ({ ...prev, signalWarning: e.target.value }))}
+                          className="w-full px-2 py-1 border rounded text-sm"
+                        >
+                          <option value="none">None</option>
+                          <option value="1">Signal #1</option>
+                          <option value="2">Signal #2</option>
+                          <option value="3">Signal #3</option>
+                          <option value="4">Signal #4</option>
+                          <option value="5">Signal #5</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-600 mb-1">Rainfall Warning</label>
+                        <select
+                          value={typhoonForm.rainfallWarning}
+                          onChange={(e) => setTyphoonForm(prev => ({ ...prev, rainfallWarning: e.target.value }))}
+                          className="w-full px-2 py-1 border rounded text-sm"
+                        >
+                          <option value="none">None</option>
+                          <option value="yellow">Yellow</option>
+                          <option value="orange">Orange</option>
+                          <option value="red">Red</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => saveTyphoonDataForDate(selectedDate, typhoonForm)}
+                        className="px-3 py-1 bg-yellow-600 text-white rounded-md text-sm"
+                      >
+                        {typhoonForm.isStartDate ? "Save Typhoon (All Days)" : "Save This Day Only"}
+                      </button>
+                      {!typhoonForm.isStartDate && (
+                        <button
+                          type="button"
+                          onClick={() => toggleEventForDate(selectedDate, 'typhoon')}
+                          className="px-3 py-1 bg-red-100 text-red-700 rounded-md text-sm"
+                        >
+                          Remove Typhoon From This Day Only
+                        </button>
+                      )}
+                    </div>
+                    {events[selectedDate]?.typhoonData && (
+                      <div className="mt-2 text-xs text-slate-600">
+                        <p>
+                          <strong>Current for this day:</strong> Signal: {events[selectedDate].typhoonData?.signalWarning || "none"} - 
+                          Rainfall: {events[selectedDate].typhoonData?.rainfallWarning || "none"}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="mb-3">
                   <textarea
