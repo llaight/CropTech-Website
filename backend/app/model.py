@@ -217,6 +217,19 @@ def create_tables():
                    )
             """)
     
+    # security_settings table
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS security_settings(
+                   security_id SERIAL PRIMARY KEY,
+                   user_id INTEGER UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
+                   two_factor_auth BOOLEAN DEFAULT FALSE,
+                   session_timeout INTEGER DEFAULT 30,
+                   save_login BOOLEAN DEFAULT FALSE,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )
+            """)
+    
     conn.commit()
     cursor.close()
     conn.close()

@@ -1574,3 +1574,183 @@ def delete_delivery(delivery_id):
     conn.close()
     
     return jsonify({"message": "Delivery deleted successfully"}), 200
+
+# -------------------------
+# Security settings endpoints
+# -------------------------
+@bp.route("/security-settings", methods=["GET"])
+def get_security_settings():
+    """Get security settings for authenticated user."""
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT two_factor_auth, session_timeout, save_login
+            FROM security_settings 
+            WHERE user_id=%s;
+        """, (user_id,))
+        row = cursor.fetchone()
+        
+        if row:
+            security = {
+                "twoFactorAuth": row[0],
+                "sessionTimeout": str(row[1]),
+                "saveLogin": row[2],
+            }
+        else:
+            # Return defaults
+            security = {
+                "twoFactorAuth": False,
+                "sessionTimeout": "30",
+                "saveLogin": False,
+            }
+            
+    except Exception as e:
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching security settings", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"security": security}), 200
+
+
+@bp.route("/security-settings", methods=["PUT"])
+def update_security_settings():
+    """Update security settings."""
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    data = request.get_json() or {}
+    
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # Check if settings exist
+        cursor.execute("SELECT 1 FROM security_settings WHERE user_id=%s;", (user_id,))
+        exists = cursor.fetchone()
+        
+        session_timeout = int(data.get("sessionTimeout", 30))
+        
+        if exists:
+            cursor.execute("""
+                UPDATE security_settings 
+                SET two_factor_auth=%s, session_timeout=%s, 
+                    save_login=%s, updated_at=CURRENT_TIMESTAMP
+                WHERE user_id=%s;
+            """, (
+                data.get("twoFactorAuth", False),
+                session_timeout,
+                data.get("saveLogin", False),
+                user_id
+            ))
+        else:
+            cursor.execute("""
+                INSERT INTO security_settings 
+                (user_id, two_factor_auth, session_timeout, save_login)
+                VALUES (%s, %s, %s, %s);
+            """, (
+                user_id,
+                data.get("twoFactorAuth", False),
+                session_timeout,
+                data.get("saveLogin", False)
+            ))
+        
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error updating security settings", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"message": "Security settings updated successfully"}), 200
+
+# -------------------------
+# PDF Download endpoint
+# -------------------------
+@bp.route("/api/download-user-guide", methods=["GET"])
+def download_user_guide():
+    """Serve the user guide PDF file."""
+    try:
+        import os
+        from flask import send_file, current_app
+        
+        # Try different possible locations for the PDF
+        possible_paths = [
+            # If PDF is in the frontend app folder (relative to backend)
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), 'frontend', 'app', 'CropTech User Guide or Manual.pdf'),
+            # If PDF is in the same directory as route.py
+            os.path.join(os.path.dirname(__file__), 'CropTech User Guide or Manual.pdf'),
+            # If PDF is in a docs folder
+            os.path.join(os.path.dirname(__file__), 'docs', 'CropTech User Guide or Manual.pdf'),
+            # If PDF is in a public folder
+            os.path.join(os.path.dirname(__file__), 'public', 'CropTech User Guide or Manual.pdf'),
+        ]
+        
+        pdf_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                pdf_path = path
+                break
+        
+        if pdf_path and os.path.exists(pdf_path):
+            return send_file(
+                pdf_path,
+                as_attachment=True,
+                download_name='CropTech_User_Manual.pdf',
+                mimetype='application/pdf'
+            )
+        else:
+            # Create a simple PDF response as fallback
+            from io import BytesIO
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+            
+            buffer = BytesIO()
+            p = canvas.Canvas(buffer, pagesize=letter)
+            p.setFont("Helvetica", 12)
+            p.drawString(100, 750, "CropTech User Guide")
+            p.drawString(100, 730, "This is a placeholder PDF.")
+            p.drawString(100, 710, "Please ensure 'CropTech User Guide or Manual.pdf'")
+            p.drawString(100, 690, "is placed in the correct location.")
+            p.showPage()
+            p.save()
+            
+            buffer.seek(0)
+            return send_file(
+                buffer,
+                as_attachment=True,
+                download_name='CropTech_User_Manual.pdf',
+                mimetype='application/pdf'
+            )
+            
+    except Exception as e:
+        return jsonify({"message": "Error serving PDF", "error": str(e)}), 500
