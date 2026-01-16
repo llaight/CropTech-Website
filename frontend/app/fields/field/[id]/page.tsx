@@ -531,7 +531,7 @@ export default function FieldDetailPage() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       // Find the crop ID by fetching crops again
-      const cropRes = await fetch(`http://localhost:5001/api/crops?field_id=${fieldId}`, { headers });
+      const cropRes = await fetch(`http://127.0.0.1:5001/api/crops?field_id=${fieldId}`, { headers });
       if (!cropRes.ok) return;
 
       const cropData = await cropRes.json().catch(() => ({}));

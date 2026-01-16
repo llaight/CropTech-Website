@@ -6,7 +6,7 @@ import { useTheme } from "../components/ThemeProvider";
 import { Icon } from "@iconify/react";
 
 type User = { id?: number; name?: string; email?: string; role?: string } | null;
-type Settings = { units: "metric" | "imperial"; language: "en" | "fil" };
+type Settings = { units: "metric" | "imperial" };
 
 function Avatar({ name }: { name?: string }) {
   const initials = (name || "")
@@ -26,9 +26,11 @@ export default function ProfilePage() {
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const [user, setUser] = useState<User>(null);
-  const [selected, setSelected] = useState<"account" | "settings" | "support" | "guide" | "share">("account");
+  const [selected, setSelected] = useState<"account" | "settings" | "guide" | "share" | "security">("account");
   const [message, setMessage] = useState<string | null>(null);
   const [showSavedPopup, setShowSavedPopup] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
 
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
@@ -37,8 +39,14 @@ export default function ProfilePage() {
   const [formNewPassword, setFormNewPassword] = useState("");
   const [formConfirmPassword, setFormConfirmPassword] = useState("");
 
-  const [settings, setSettings] = useState<Settings>({ units: "metric", language: "en" });
+  const [settings, setSettings] = useState<Settings>({ units: "metric" });
+  const [securitySettings, setSecuritySettings] = useState({
+    twoFactorAuth: false,
+    sessionTimeout: "30",
+    saveLogin: false,
+  });
 
+  // Load user data, settings, and security settings
   useEffect(() => {
     try {
       const raw = localStorage.getItem("user");
@@ -50,11 +58,115 @@ export default function ProfilePage() {
         setFormRole(parsed.role || "");
       }
     } catch {}
+    
     try {
       const s = localStorage.getItem("settings");
       if (s) setSettings(JSON.parse(s));
     } catch {}
+    
+    // Fetch security settings from backend
+    fetchSecuritySettings();
   }, []);
+
+  // Fetch security settings from backend
+  const fetchSecuritySettings = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const response = await fetch("http://localhost:5001/api/security-settings", {
+        method: "GET",
+        headers: { 
+          "Content-Type": "application/json", 
+          Authorization: `Bearer ${token}` 
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setSecuritySettings({
+          twoFactorAuth: data.security?.twoFactorAuth || false,
+          sessionTimeout: data.security?.sessionTimeout?.toString() || "30",
+          saveLogin: data.security?.saveLogin || false,
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching security settings:", error);
+    }
+  };
+
+  // Save security settings to backend
+  const saveSecuritySettings = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setMessage("Please log in to save security settings");
+      setTimeout(() => setMessage(null), 3500);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch("http://localhost:5001/api/security-settings", {
+        method: "PUT",
+        headers: { 
+          "Content-Type": "application/json", 
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          twoFactorAuth: securitySettings.twoFactorAuth,
+          sessionTimeout: parseInt(securitySettings.sessionTimeout),
+          saveLogin: securitySettings.saveLogin,
+        }),
+      });
+
+      if (response.ok) {
+        setMessage("Security settings saved successfully");
+        setTimeout(() => setMessage(null), 2500);
+      } else {
+        const error = await response.json();
+        setMessage(error.message || "Failed to save security settings");
+        setTimeout(() => setMessage(null), 3500);
+      }
+    } catch (error) {
+      setMessage("Network error while saving security settings");
+      setTimeout(() => setMessage(null), 3500);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Function to download PDF
+  const downloadPDF = async () => {
+    setPdfDownloading(true);
+    try {
+      // Try to download from the backend API first
+      const response = await fetch("http://localhost:5001/api/download-user-guide");
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "CropTech_User_Manual.pdf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        setMessage("PDF download started");
+        setTimeout(() => setMessage(null), 2500);
+      } else {
+        // If backend fails, try the direct public folder approach
+        window.open("/CropTech User Guide or Manual.pdf", "_blank");
+        setMessage("Opening PDF in new tab");
+        setTimeout(() => setMessage(null), 2500);
+      }
+    } catch (error) {
+      console.error("Error downloading PDF:", error);
+      setMessage("Failed to download PDF. Please try again.");
+      setTimeout(() => setMessage(null), 3500);
+    } finally {
+      setPdfDownloading(false);
+    }
+  };
 
   function saveAccount() {
     const currentStoredPassword = (user as any)?.password || null;
@@ -161,8 +273,8 @@ export default function ProfilePage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Profile</h1>
-            <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Manage your account, settings and support options.</p>
+            <h1 className={`text-2xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>Profile & Settings</h1>
+            <p className={`mt-1 text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>Manage your account, preferences, and app settings.</p>
           </div>
           <div>
             <BackButton className="hover:opacity-90" iconClassName={`${isDark ? "text-white" : "text-slate-900"}`} />
@@ -178,23 +290,24 @@ export default function ProfilePage() {
               <div>
                 <h2 className={`text-lg font-semibold ${headingText}`}>{user?.name || "Unnamed User"}</h2>
                 <p className={`text-sm ${mutedText}`}>{user?.role || "Role not set"}</p>
+                <p className={`text-xs ${mutedText} mt-1`}>{user?.email || ""}</p>
               </div>
             </div>
 
             <nav className="mt-5">
               <ul className="space-y-2">
                 {[
-                  { key: "account", label: "Account" },
-                  { key: "settings", label: "Settings" },
-                  { key: "support", label: "Support Chat" },
-                  { key: "guide", label: "User Guide" },
-                  { key: "share", label: "Share App" },
+                  { key: "account", label: "Account", icon: "mdi:account-outline" },
+                  { key: "settings", label: "App Settings", icon: "mdi:cog-outline" },
+                  { key: "security", label: "Security", icon: "mdi:shield-outline" },
+                  { key: "guide", label: "User Guide", icon: "mdi:book-open-outline" },
+                  { key: "share", label: "Share App", icon: "mdi:share-variant-outline" },
                 ].map((item) => (
                   <li key={item.key}>
                     <button
                       onClick={() => setSelected(item.key as any)}
                       className={
-                        "w-full text-left px-3 py-2 rounded-md transition-colors " +
+                        "w-full text-left px-3 py-2 rounded-md transition-colors flex items-center gap-3 " +
                         (selected === item.key
                           ? (isDark
                               ? "bg-green-900/30 text-green-300"
@@ -204,16 +317,27 @@ export default function ProfilePage() {
                               : "text-slate-700 hover:bg-slate-50"))
                       }
                     >
+                      <Icon icon={item.icon} className="w-5 h-5" />
                       {item.label}
                     </button>
                   </li>
                 ))}
               </ul>
             </nav>
+
+            <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">Account Status</div>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${user ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                <span className="text-xs text-slate-600 dark:text-slate-400">
+                  {user ? 'Account Active' : 'Not Logged In'}
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Right column */}
-          <div className={`${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"} rounded-xl shadow-sm border p-5 lg:col-span-2 transition-colors`}>
+          <div className={`${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"} rounded-xl shadow-sm border p-5 lg:col-span-2 transition-colors min-h-[500px]`}>
             {message && (
               <div className={`mb-4 text-sm ${theme === "dark" ? "text-green-300" : "text-green-700"}`}>{message}</div>
             )}
@@ -227,7 +351,8 @@ export default function ProfilePage() {
 
             {selected === "account" && (
               <div>
-                <h3 className={`text-lg font-semibold mb-4 ${headingText}`}>Account</h3>
+                <h3 className={`text-lg font-semibold mb-4 ${headingText}`}>Account Information</h3>
+                <p className={`text-sm ${mutedText} mb-4`}>Update your personal information and password.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <label className="block">
                     <div className={`text-sm font-medium ${headingText}`}>Full name</div>
@@ -241,29 +366,42 @@ export default function ProfilePage() {
 
                   <label className="block">
                     <div className={`text-sm font-medium ${headingText}`}>Role</div>
-                    <input value={formRole} onChange={(e) => setFormRole(e.target.value)} placeholder="e.g., Farmer" className={inputClass} />
+                    <input value={formRole} onChange={(e) => setFormRole(e.target.value)} placeholder="e.g., Farmer, Manager" className={inputClass} />
                   </label>
 
-                  <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <label className="block">
-                      <div className={`text-sm font-medium ${headingText}`}>Current password</div>
-                      <input type="password" value={formPassword} onChange={(e) => setFormPassword(e.target.value)} className={inputClass} />
-                    </label>
+                  <div className="md:col-span-2 mt-2">
+                    <h4 className={`text-md font-medium mb-3 ${headingText}`}>Change Password</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <label className="block">
+                        <div className={`text-sm font-medium ${headingText}`}>Current password</div>
+                        <input type="password" value={formPassword} onChange={(e) => setFormPassword(e.target.value)} className={inputClass} />
+                      </label>
 
-                    <label className="block">
-                      <div className={`text-sm font-medium ${headingText}`}>New password</div>
-                      <input type="password" value={formNewPassword} onChange={(e) => setFormNewPassword(e.target.value)} className={inputClass} />
-                    </label>
+                      <label className="block">
+                        <div className={`text-sm font-medium ${headingText}`}>New password</div>
+                        <input type="password" value={formNewPassword} onChange={(e) => setFormNewPassword(e.target.value)} className={inputClass} />
+                      </label>
 
-                    <label className="block">
-                      <div className={`text-sm font-medium ${headingText}`}>Confirm new password</div>
-                      <input type="password" value={formConfirmPassword} onChange={(e) => setFormConfirmPassword(e.target.value)} className={inputClass} />
-                    </label>
+                      <label className="block">
+                        <div className={`text-sm font-medium ${headingText}`}>Confirm new password</div>
+                        <input type="password" value={formConfirmPassword} onChange={(e) => setFormConfirmPassword(e.target.value)} className={inputClass} />
+                      </label>
+                    </div>
                   </div>
 
-                  <div className="pt-2 md:col-span-2">
-                    <button className="px-4 py-2 bg-green-600 text-white rounded-md" onClick={saveAccount}>
+                  <div className="pt-2 md:col-span-2 flex gap-3">
+                    <button className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors" onClick={saveAccount}>
                       Save Changes
+                    </button>
+                    <button className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" onClick={() => {
+                      setFormName(user?.name || "");
+                      setFormEmail(user?.email || "");
+                      setFormRole(user?.role || "");
+                      setFormPassword("");
+                      setFormNewPassword("");
+                      setFormConfirmPassword("");
+                    }}>
+                      Reset
                     </button>
                   </div>
                 </div>
@@ -272,106 +410,322 @@ export default function ProfilePage() {
 
             {selected === "settings" && (
               <div>
-                <h3 className={`text-lg font-semibold mb-4 ${headingText}`}>Settings</h3>
+                <h3 className={`text-lg font-semibold mb-4 ${headingText}`}>Application Settings</h3>
+                <p className={`text-sm ${mutedText} mb-4`}>Customize your CropTech experience.</p>
 
                 <div className="mb-4">
-                  <div className={`text-sm font-medium mb-2 ${headingText}`}>Unit system</div>
-                  <label className={`inline-flex items-center mr-4 ${mutedText}`}>
-                    <input
-                      type="radio"
-                      name="units"
-                      checked={settings.units === "metric"}
-                      onChange={() => setSettings({ ...settings, units: "metric" })}
-                    />
-                    <span className="ml-2">Metric — kg, ha, m/s, mm, C</span>
-                  </label>
-                  <label className={`flex items-center mt-3 ${mutedText}`}>
-                    <input
-                      type="radio"
-                      name="units"
-                      checked={settings.units === "imperial"}
-                      onChange={() => setSettings({ ...settings, units: "imperial" })}
-                    />
-                    <span className="ml-2">Imperial — lb, ac, mph, in, F</span>
-                  </label>
+                  <div className={`text-sm font-medium mb-2 ${headingText}`}>Unit System</div>
+                  <div className="space-y-2">
+                    <label className={`flex items-center ${mutedText}`}>
+                      <input
+                        type="radio"
+                        name="units"
+                        checked={settings.units === "metric"}
+                        onChange={() => setSettings({ units: "metric" })}
+                        className="mr-2"
+                      />
+                      <span>Metric — kg, ha, m/s, mm, °C</span>
+                    </label>
+                    <label className={`flex items-center ${mutedText}`}>
+                      <input
+                        type="radio"
+                        name="units"
+                        checked={settings.units === "imperial"}
+                        onChange={() => setSettings({ units: "imperial" })}
+                        className="mr-2"
+                      />
+                      <span>Imperial — lb, ac, mph, in, °F</span>
+                    </label>
+                  </div>
                 </div>
 
                 <hr className={dividerClass} />
 
-                <div className="mb-4">
-                  <div className={`text-sm font-medium mb-2 ${headingText}`}>Language</div>
-                  <select
-                    value={settings.language}
-                    onChange={(e) => setSettings({ ...settings, language: e.target.value as "en" | "fil" })}
-                    className={
-                      "px-3 py-2 rounded-md border " +
-                      (theme === "dark" ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-900")
-                    }
-                  >
-                    <option value="en">English</option>
-                    <option value="fil">Filipino</option>
-                  </select>
-                </div>
-
-                <hr className={dividerClass} />
-
-                <div className="mb-4">
-                  <a
-                    href="/privacy"
-                    className={`text-sm font-medium inline-block ${theme === "dark" ? "text-green-300" : "text-green-600"} hover:underline`}
-                  >
-                    Privacy Policy
-                  </a>
-                </div>
-
-                <hr className={dividerClass} />
-
-                <div className="mb-4">
-                  <a
-                    href="/terms"
-                    className={`text-sm font-medium inline-block ${theme === "dark" ? "text-green-300" : "text-green-600"} hover:underline`}
-                  >
-                    Terms of Use
-                  </a>
-                </div>
-
-                <div>
-                  <button className="px-4 py-2 bg-green-600 text-white rounded-md" onClick={saveSettings}>
-                    Save settings
+                <div className="flex gap-3">
+                  <button className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors" onClick={saveSettings}>
+                    Save Settings
+                  </button>
+                  <button className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" onClick={() => {
+                    setSettings({ units: "metric" });
+                  }}>
+                    Reset to Defaults
                   </button>
                 </div>
               </div>
             )}
 
-            {selected === "support" && (
+            {selected === "security" && (
               <div>
-                <h3 className={`text-lg font-semibold mb-2 ${headingText}`}>Support Chat</h3>
-                <p className={`text-sm ${mutedText} mb-3`}>
-                  Hi <span role="img" aria-label="wave">👋</span>
-                </p>
-                <p className={`text-sm ${mutedText} mb-4`}>Ask us anything or share your feedback!</p>
-                <SupportChat userEmail={user?.email} theme={theme} />
+                <h3 className={`text-lg font-semibold mb-4 ${headingText}`}>Security Settings</h3>
+                <p className={`text-sm ${mutedText} mb-4`}>Manage your account security and privacy.</p>
+
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className={`text-sm font-medium ${headingText}`}>Two-Factor Authentication</div>
+                      <div className={`text-xs ${mutedText}`}>Add an extra layer of security to your account</div>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={securitySettings.twoFactorAuth}
+                        onChange={(e) => setSecuritySettings({ ...securitySettings, twoFactorAuth: e.target.checked })}
+                        className="sr-only"
+                        id="toggle-2fa"
+                      />
+                      <label
+                        htmlFor="toggle-2fa"
+                        className={`block w-12 h-6 rounded-full cursor-pointer transition-colors ${securitySettings.twoFactorAuth ? 'bg-green-600' : 'bg-slate-300 dark:bg-slate-700'}`}
+                      >
+                        <span className={`block w-5 h-5 mt-0.5 ml-0.5 rounded-full bg-white transition-transform ${securitySettings.twoFactorAuth ? 'transform translate-x-6' : ''}`}></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className={`text-sm font-medium mb-2 ${headingText}`}>Session Timeout</div>
+                    <select
+                      value={securitySettings.sessionTimeout}
+                      onChange={(e) => setSecuritySettings({ ...securitySettings, sessionTimeout: e.target.value })}
+                      className={
+                        "w-full md:w-64 px-3 py-2 rounded-md border " +
+                        (theme === "dark" ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-900")
+                      }
+                    >
+                      <option value="15">15 minutes</option>
+                      <option value="30">30 minutes</option>
+                      <option value="60">1 hour</option>
+                      <option value="120">2 hours</option>
+                      <option value="0">Never (not recommended)</option>
+                    </select>
+                    <div className={`text-xs ${mutedText} mt-1`}>Automatically log out after inactivity</div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className={`text-sm font-medium ${headingText}`}>Save Login</div>
+                      <div className={`text-xs ${mutedText}`}>Keep me logged in on this device</div>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={securitySettings.saveLogin}
+                        onChange={(e) => setSecuritySettings({ ...securitySettings, saveLogin: e.target.checked })}
+                        className="sr-only"
+                        id="toggle-save-login"
+                      />
+                      <label
+                        htmlFor="toggle-save-login"
+                        className={`block w-12 h-6 rounded-full cursor-pointer transition-colors ${securitySettings.saveLogin ? 'bg-green-600' : 'bg-slate-300 dark:bg-slate-700'}`}
+                      >
+                        <span className={`block w-5 h-5 mt-0.5 ml-0.5 rounded-full bg-white transition-transform ${securitySettings.saveLogin ? 'transform translate-x-6' : ''}`}></span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <hr className={dividerClass} />
+
+                <div className="flex gap-3">
+                  <button 
+                    className={`px-4 py-2 ${isLoading ? 'bg-green-500' : 'bg-green-600'} text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2`} 
+                    onClick={saveSecuritySettings}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Icon icon="mdi:loading" className="w-4 h-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : 'Save Security Settings'}
+                  </button>
+                  <button className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" onClick={() => {
+                    setSecuritySettings({
+                      twoFactorAuth: false,
+                      sessionTimeout: "30",
+                      saveLogin: false,
+                    });
+                  }}>
+                    Reset to Defaults
+                  </button>
+                </div>
               </div>
             )}
 
             {selected === "guide" && (
-              <div>
-                <h3 className={`text-lg font-semibold mb-2 ${headingText}`}>Handy Tips from CropTech team</h3>
-                <p className={`text-sm ${mutedText} mb-4`}>Quick pointers to help you get the most out of CropTech.</p>
+              <div className="flex flex-col h-full max-h-[calc(100vh-250px)]">
+                <h3 className={`text-lg font-semibold mb-4 ${headingText}`}>CropTech User Guide</h3>
+                <p className={`text-sm ${mutedText} mb-4`}>Learn how to make the most of CropTech with these helpful resources.</p>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {["General Info", "App features", "Account Settings", "Troubleshooting"].map((title) => (
-                    <div
-                      key={title}
-                      className={
-                        "border rounded-md p-4 " +
-                        (theme === "dark" ? "bg-slate-900 border-slate-800" : "bg-white/80 border-slate-200")
-                      }
-                    >
-                      <h4 className={`font-semibold mb-2 ${headingText}`}>{title}</h4>
-                      <p className={`text-sm ${mutedText}`}>Placeholder content</p>
+                {/* Download PDF Button */}
+                <div className="mb-4 p-4 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className={`font-semibold mb-1 ${theme === "dark" ? "text-green-300" : "text-green-700"}`}>Complete User Manual</h4>
+                      <p className={`text-sm ${theme === "dark" ? "text-green-200" : "text-green-600"}`}>
+                        Download the full user manual for detailed instructions on all features.
+                      </p>
                     </div>
-                  ))}
+                    <button
+                      onClick={downloadPDF}
+                      disabled={pdfDownloading}
+                      className="px-4 py-2 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 transition-colors flex items-center justify-center gap-2 sm:w-auto w-full disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                      {pdfDownloading ? (
+                        <>
+                          <Icon icon="mdi:loading" className="w-4 h-4 animate-spin" />
+                          Downloading...
+                        </>
+                      ) : (
+                        <>
+                          <Icon icon="mdi:download" className="w-4 h-4" />
+                          Download PDF
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scrollable User Guide Content - Fixed height with proper scrolling */}
+                <div className="flex-grow overflow-hidden border border-slate-200 dark:border-slate-700 rounded-lg">
+                  <div className="h-full overflow-y-auto p-4">
+                    <div className="space-y-6">
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>1. Introduction</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2">CropTech is a web-based agricultural management system designed to support rice farmers and agricultural managers by providing tools for:</p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li>Field and land tracking</li>
+                            <li>Inventory management</li>
+                            <li>Agricultural data analytics</li>
+                            <li>Real-time and historical data visualization</li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>2. Getting Started</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2">To access the system:</p>
+                          <ol className="list-decimal pl-5 space-y-1">
+                            <li>Open a supported web browser (Chrome, Firefox, Edge)</li>
+                            <li>Enter the CropTech website URL</li>
+                            <li>The Landing Page will appear with login/registration options</li>
+                          </ol>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>3. User Account Management</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2"><strong>Creating a New Account:</strong></p>
+                          <ol className="list-decimal pl-5 space-y-1">
+                            <li>From the Landing Page, click Create Account</li>
+                            <li>Enter your full name, email address, and password</li>
+                            <li>Click Sign Up and verify your email</li>
+                          </ol>
+                          
+                          <p className="mt-3 mb-2"><strong>Logging In:</strong></p>
+                          <ol className="list-decimal pl-5 space-y-1">
+                            <li>Click Log In on the Landing Page</li>
+                            <li>Enter your registered email and password</li>
+                            <li>Click Log In to access the Dashboard</li>
+                          </ol>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>4. System Navigation</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2">After logging in, use the main navigation menu to access:</p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li><strong>Dashboard:</strong> Main overview with quick access to all modules</li>
+                            <li><strong>Land Tracker:</strong> Manage and monitor agricultural fields</li>
+                            <li><strong>Inventory:</strong> Track farm resources and supplies</li>
+                            <li><strong>Analytics:</strong> View visual insights and data</li>
+                            <li><strong>User Profile:</strong> Manage account settings</li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>5. Land Tracker Module</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2">The Land Tracker allows you to:</p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li>View all registered fields on an interactive map</li>
+                            <li>Select fields to see location and boundaries</li>
+                            <li>View field details including size and crop information</li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>6. Inventory Module</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2">Manage farm resources with the Inventory module:</p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li><strong>Add Items:</strong> Click Add Item, enter name, quantity, category</li>
+                            <li><strong>Update Items:</strong> Select item, click Edit, modify details</li>
+                            <li><strong>Delete Items:</strong> Select item, click Delete, confirm</li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>7. Analytics Module</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p>View visual insights using real-time and historical agricultural data including:</p>
+                          <ul className="list-disc pl-5 space-y-1 mt-1">
+                            <li>Crop performance metrics</li>
+                            <li>Weather-related data analysis</li>
+                            <li>Field productivity analytics</li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>8. Security Features</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p>CropTech includes multiple security features:</p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li>Secure login and authentication</li>
+                            <li>Email verification for new accounts</li>
+                            <li>Protected user sessions</li>
+                            <li>Two-factor authentication option</li>
+                            <li>Session timeout controls</li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>9. System Requirements</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2"><strong>Hardware:</strong></p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li>Desktop or laptop computer</li>
+                            <li>Minimum screen resolution: 1280 × 720</li>
+                            <li>Stable internet connection</li>
+                          </ul>
+                          
+                          <p className="mt-3 mb-2"><strong>Software:</strong></p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li>Web browser (Chrome, Firefox, Edge recommended)</li>
+                            <li>Internet access for real-time features</li>
+                          </ul>
+                        </div>
+                      </section>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 text-center">
+                  <p className={`text-sm ${mutedText}`}>
+                    For additional help, contact support at{" "}
+                    <a href="mailto:support@croptech.com" className="text-green-600 dark:text-green-400 hover:underline">
+                      support@croptech.com
+                    </a>
+                  </p>
                 </div>
               </div>
             )}
@@ -384,100 +738,6 @@ export default function ProfilePage() {
             )}
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function SupportChat({ userEmail, theme }: { userEmail?: string | null; theme: "light" | "dark" }) {
-  type ChatMessage = { id: number; sender: "team" | "user"; text: string; time: number };
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
-
-  const storageKey = `supportChat:${userEmail || "anonymous"}`;
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        setMessages(JSON.parse(raw));
-        return;
-      }
-    } catch {}
-    const welcome: ChatMessage = {
-      id: Date.now(),
-      sender: "team",
-      text: "Hi! Welcome to CropTech support — how can we help you today?",
-      time: Date.now(),
-    };
-    setMessages([welcome]);
-  }, [storageKey]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(messages));
-    } catch {}
-    if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight;
-  }, [messages, storageKey]);
-
-  function sendMessage() {
-    const text = input.trim();
-    if (!text) return;
-    const userMsg: ChatMessage = { id: Date.now(), sender: "user", text, time: Date.now() };
-    setMessages((m) => [...m, userMsg]);
-    setInput("");
-
-    setTimeout(() => {
-      const reply: ChatMessage = {
-        id: Date.now() + 1,
-        sender: "team",
-        text: "Thanks for reaching out — a member of our team will reply shortly.",
-        time: Date.now(),
-      };
-      setMessages((m) => [...m, reply]);
-    }, 900);
-  }
-
-  return (
-    <div className={theme === "dark" ? "border border-slate-800 rounded-md p-4 bg-slate-900" : "border rounded-md p-4 bg-white/70"}>
-      <div
-        ref={containerRef}
-        className={
-          "h-64 overflow-y-auto p-2 rounded-md space-y-3 " +
-          (theme === "dark" ? "bg-slate-800" : "bg-slate-50")
-        }
-      >
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={
-                `${msg.sender === "user"
-                  ? "bg-green-600 text-white"
-                  : theme === "dark"
-                    ? "bg-slate-900 text-slate-100 border border-slate-800"
-                    : "bg-white text-slate-800 border"} max-w-[80%] px-3 py-2 rounded-lg shadow-sm`
-              }
-            >
-              <div className="text-sm">{msg.text}</div>
-              <div className="text-xs text-slate-400 mt-1">{new Date(msg.time).toLocaleTimeString()}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-3 flex gap-2">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          className={
-            "flex-1 px-3 py-2 rounded-md border " +
-            (theme === "dark" ? "bg-slate-900 border-slate-700 text-slate-100" : "bg-white border-slate-300 text-slate-900")
-          }
-          placeholder="Type your message..."
-        />
-        <button className="px-4 py-2 bg-green-600 text-white rounded-md" onClick={sendMessage}>Send</button>
       </div>
     </div>
   );
@@ -508,7 +768,7 @@ function ShareApp({ theme }: { theme: "light" | "dark" }) {
         return;
       }
       setToast("Share not supported on this device");
-      setTimeout(() => setToast(null), 2200);
+      setTimeout(() => setToast(null), 2200); 
     } catch {
       setToast("Share failed");
       setTimeout(() => setToast(null), 2200);
@@ -537,8 +797,8 @@ function ShareApp({ theme }: { theme: "light" | "dark" }) {
           className={
             "flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-md " +
             (theme === "dark"
-              ? "bg-slate-800 text-slate-100 border border-slate-700"
-              : "bg-slate-100 text-slate-800 border")
+              ? "bg-slate-800 text-slate-100 border border-slate-700 hover:bg-slate-700"
+              : "bg-slate-100 text-slate-800 border hover:bg-slate-200")
           }
         >
           <Icon icon="material-symbols:link" className="w-5 h-5" />
@@ -548,7 +808,7 @@ function ShareApp({ theme }: { theme: "light" | "dark" }) {
           onClick={nativeShare}
           className={
             "flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-md " +
-            (theme === "dark" ? "bg-slate-800 text-slate-100 border border-slate-700" : "bg-slate-100 text-slate-800 border")
+            (theme === "dark" ? "bg-slate-800 text-slate-100 border border-slate-700 hover:bg-slate-700" : "bg-slate-100 text-slate-800 border hover:bg-slate-200")
           }
         >
           <Icon icon="material-symbols:share-outline" className="w-5 h-5" />
