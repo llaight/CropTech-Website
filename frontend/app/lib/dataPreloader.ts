@@ -47,7 +47,7 @@ export async function prefetchUserData(token: string): Promise<void> {
     const inventory = inventoryRes?.ok 
       ? await inventoryRes.json().then(data => {
           console.log('Inventory response:', data);
-          return data.items || [];
+          return data.inventory || data.items || [];
         }).catch(err => {
           console.error('Error parsing inventory:', err);
           return [];

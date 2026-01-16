@@ -67,6 +67,7 @@ interface DeliveryRecord {
   status: 'to be delivered' | 'delivered' | 'cancelled' | 'returned';
   items: DeliveryLineItem[];
   total_quantity_kg: number; // total: sum of (sacks * sack_size_kg) for all items
+  total_revenue_php: number; // Total revenue in PHP
   notes: string;
   created_at: string;
 }
@@ -1818,7 +1819,7 @@ export default function InventoryPage() {
                                     )}
                                     <div className="flex justify-between items-center pt-2 border-t border-blue-100 mb-3">
                                       <span className="text-xs text-slate-600">Total Price</span>
-                                      <span className="font-bold text-blue-700">₱{formatPrice(calculateDeliveryPrice(delivery))}</span>
+                                      <span className="font-bold text-blue-700">₱{formatPrice(delivery.total_revenue_php)}</span>
                                     </div>
                                     <div className="flex gap-2">
                                       <button
@@ -1883,7 +1884,7 @@ export default function InventoryPage() {
                                     )}
                                     <div className="flex justify-between items-center pt-2 border-t border-green-100 mb-3">
                                       <span className="text-xs text-slate-600">Total Price</span>
-                                      <span className="font-bold text-green-700">₱{formatPrice(calculateDeliveryPrice(delivery))}</span>
+                                      <span className="font-bold text-green-700">₱{formatPrice(delivery.total_revenue_php)}</span>
                                     </div>
                                     <button
                                       onClick={() => updateDeliveryStatus(delivery.id, 'returned').then(() => loadDeliveriesFromBackend())}
@@ -1941,7 +1942,7 @@ export default function InventoryPage() {
                                     )}
                                     <div className="flex justify-between items-center pt-2 border-t border-slate-200">
                                       <span className="text-xs text-slate-600">Total Price</span>
-                                      <span className="font-bold text-slate-700">₱{formatPrice(calculateDeliveryPrice(delivery))}</span>
+                                      <span className="font-bold text-slate-700">₱{formatPrice(delivery.total_revenue_php)}</span>
                                     </div>
                                   </div>
                                 ))

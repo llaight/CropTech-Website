@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 
 // Import your local PNG files
@@ -55,6 +55,14 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
     durationUnit: "days",
     isStartDate: true
   });
+
+  // Harvest modal state
+  const [isHarvestModalOpen, setIsHarvestModalOpen] = useState(false);
+  const [harvestFormDate, setHarvestFormDate] = useState<string>("");
+  const [actualYieldKg, setActualYieldKg] = useState<string>("");
+  const [harvestNotes, setHarvestNotes] = useState<string>("");
+  const [isSubmittingHarvest, setIsSubmittingHarvest] = useState(false);
+  const [harvestError, setHarvestError] = useState<string | null>(null);
 
   // Use ref to track loading state
   const initialLoadDone = useRef(false);
@@ -572,6 +580,119 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
     return events[dateKey]?.typhoonData?.isStartDate || false;
   }, [events]);
 
+  // Check if ready to harvest
+  const isReadyToHarvest = useMemo(() => {
+    if (!harvestDate) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const expected = new Date(harvestDate);
+    expected.setHours(0, 0, 0, 0);
+    return today >= expected;
+  }, [harvestDate]);
+
+  // Open harvest modal
+  const openHarvestModal = useCallback(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    setHarvestFormDate(today);
+    setActualYieldKg("");
+    setHarvestNotes("");
+    setHarvestError(null);
+    setIsHarvestModalOpen(true);
+  }, []);
+
+  // Submit harvest
+  const submitHarvest = useCallback(async () => {
+    if (!harvestFormDate) {
+      setHarvestError("Please select a harvest date");
+      return;
+    }
+
+    if (!actualYieldKg || parseFloat(actualYieldKg) <= 0) {
+      setHarvestError("Please enter a valid actual yield");
+      return;
+    }
+
+    setIsSubmittingHarvest(true);
+    setHarvestError(null);
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      // Fetch crop ID
+      const cropRes = await fetch(`http://localhost:5001/api/crops?field_id=${fieldId}`, { headers });
+      if (!cropRes.ok) {
+        setHarvestError("Failed to fetch crop data");
+        setIsSubmittingHarvest(false);
+        return;
+      }
+
+      const cropData = await cropRes.json().catch(() => ({}));
+      if (!cropData.crops || !Array.isArray(cropData.crops) || cropData.crops.length === 0) {
+        setHarvestError("No crop found for this field");
+        setIsSubmittingHarvest(false);
+        return;
+      }
+
+      const cropId = cropData.crops[0].id;
+
+      // Record harvest history and free the field
+      const harvestRes = await fetch(`http://127.0.0.1:5001/api/crops/${cropId}/harvest`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ 
+          actual_harvest_date: harvestFormDate,
+          actual_yield_kg: actualYieldKg ? parseFloat(actualYieldKg) : undefined,
+          notes: harvestNotes || undefined
+        }),
+      });
+
+      if (!harvestRes.ok) {
+        const text = await harvestRes.text();
+        setHarvestError(text || "Failed to record harvest");
+        setIsSubmittingHarvest(false);
+        return;
+      }
+
+      console.log("Harvest recorded successfully");
+
+      // Update field status to "available" after harvest
+      const updateFieldRes = await fetch(`http://127.0.0.1:5001/api/fields/${fieldId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: "available" }),
+      });
+
+      if (!updateFieldRes.ok) {
+        console.error("Failed to update field status");
+      } else {
+        console.log("Field status updated to available");
+      }
+
+      setHarvestDate(harvestFormDate);
+      setIsHarvestModalOpen(false);
+      
+      // Clear cache to ensure fresh data on reload
+      try {
+        localStorage.removeItem('cachedFieldsData');
+        localStorage.removeItem('cachedInventoryData');
+      } catch (e) {
+        console.error("Error clearing cache:", e);
+      }
+      
+      alert(`Harvest recorded successfully on ${harvestFormDate}. The field is now available.`);
+      
+      // Reload the page to reflect the changes (crop deleted, field available)
+      window.location.reload();
+      
+    } catch (err: any) {
+      setHarvestError(err?.message || "Network error while recording harvest");
+    } finally {
+      setIsSubmittingHarvest(false);
+    }
+  }, [actualYieldKg, fieldId, harvestFormDate, harvestNotes]);
+
   return (
     <div className="mt-6 bg-white/80 p-6 rounded-xl shadow">
       <h3 className="text-lg font-semibold mb-3">Planting & Harvest</h3>
@@ -607,15 +728,13 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={clearDates}
-            className="text-sm px-3 py-1 rounded-md bg-red-50 text-red-700 border border-red-100"
-          >
-            Clear
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={clearDates}
+          className="text-sm px-3 py-1 rounded-md bg-red-50 text-red-700 border border-red-100"
+        >
+          Clear
+        </button>
       </div>
 
       {/* Calendar view */}
@@ -996,6 +1115,109 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
           </div>
         )}
       </div>
+
+      {/* Harvest button - bottom right */}
+      {harvestDate && (
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={openHarvestModal}
+            className={`text-sm px-4 py-2 rounded-md font-semibold shadow transition-colors ${
+              isReadyToHarvest
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-red-600 text-white hover:bg-red-700"
+            }`}
+          >
+            {isReadyToHarvest ? "🌾 Harvest Now" : "⚠️ Harvest Early"}
+          </button>
+        </div>
+      )}
+
+      {/* Harvest Modal */}
+      {isHarvestModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6">
+            <h2 className="text-lg font-semibold text-slate-900">
+              {isReadyToHarvest ? "Record Harvest" : "Record Early Harvest"}
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              {isReadyToHarvest
+                ? "The expected harvest date has been reached."
+                : "You are harvesting before the expected date."}
+            </p>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="harvest-date-input">
+                  Actual Harvest Date
+                </label>
+                <input
+                  id="harvest-date-input"
+                  type="date"
+                  value={harvestFormDate}
+                  onChange={(e) => setHarvestFormDate(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  max={new Date().toISOString().slice(0, 10)}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="actual-yield-input">
+                  Actual Yield (kg)
+                </label>
+                <input
+                  id="actual-yield-input"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={actualYieldKg}
+                  onChange={(e) => setActualYieldKg(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  placeholder="Enter harvested yield in kg"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="harvest-notes-input">
+                  Notes (optional)
+                </label>
+                <textarea
+                  id="harvest-notes-input"
+                  value={harvestNotes}
+                  onChange={(e) => setHarvestNotes(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                  rows={3}
+                  placeholder="Add any notes about the harvest..."
+                />
+              </div>
+
+              {harvestError && (
+                <p className="text-xs text-red-600">{harvestError}</p>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setIsHarvestModalOpen(false);
+                  setHarvestError(null);
+                }}
+                disabled={isSubmittingHarvest}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitHarvest}
+                disabled={isSubmittingHarvest || !harvestFormDate || !actualYieldKg}
+                className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg shadow hover:bg-green-700 disabled:opacity-60"
+              >
+                {isSubmittingHarvest ? "Recording..." : "Record Harvest"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

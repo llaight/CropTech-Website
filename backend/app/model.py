@@ -58,19 +58,35 @@ def create_tables():
                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                    )
             """)
-    
+
     # field table 
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS fields(
                    field_id SERIAL PRIMARY KEY,
                    name TEXT,
                    location TEXT NOT NULL,
-                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE
+                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                   area_ha FLOAT,
+                   status TEXT DEFAULT 'available' CHECK (status IN ('available', 'occupied'))
                   )
             """)
 
-    # Add name column for existing deployments
+    # Add columns for existing deployments
     cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS name TEXT;")
+    cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS area_ha FLOAT;")
+    cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'available';")
+    cursor.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'fields_status_check'
+            ) THEN
+                ALTER TABLE fields
+                ADD CONSTRAINT fields_status_check CHECK (status IN ('available', 'occupied'));
+            END IF;
+        END$$;
+    """)
 
     #weather data table
     cursor.execute("""
@@ -137,21 +153,58 @@ def create_tables():
     
     # crops table
     cursor.execute("""
-            CREATE TABLE IF NOT EXISTS crops(
-                   crop_id SERIAL PRIMARY KEY,
-                   name TEXT NOT NULL,
-                   health_status TEXT,
-                   planting_date DATE,
-                   expected_harvest_date DATE,
-                   notes TEXT,
-                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
-                   field_id INTEGER REFERENCES fields(field_id) ON DELETE CASCADE
-                   )       
-            """)
+             CREATE TABLE IF NOT EXISTS crops(
+                     crop_id SERIAL PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     health_status TEXT,
+                     planting_date DATE,
+                     expected_harvest_date DATE,
+                     actual_harvest_date DATE,
+                     expected_yield_kg FLOAT,
+                     actual_yield_kg FLOAT,
+                     notes TEXT,
+                     user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                     field_id INTEGER REFERENCES fields(field_id) ON DELETE CASCADE
+                     )       
+             """)
     
     # Add missing columns for existing deployments
     cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS expected_harvest_date DATE;")
+    cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS actual_harvest_date DATE;")
+    cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS expected_yield_kg FLOAT;")
+    cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS actual_yield_kg FLOAT;")
     cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS notes TEXT;")
+
+    # crop harvest history table
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS crop_harvest_history(
+                   harvest_id SERIAL PRIMARY KEY,
+                   crop_id INTEGER REFERENCES crops(crop_id) ON DELETE SET NULL,
+                   field_id INTEGER REFERENCES fields(field_id) ON DELETE SET NULL,
+                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                   crop_name TEXT NOT NULL,
+                   planting_date DATE,
+                   expected_harvest_date DATE,
+                   actual_harvest_date DATE,
+                   expected_yield_kg FLOAT,
+                   actual_yield_kg FLOAT,
+                   notes TEXT,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )       
+            """)
+
+    # Add columns for existing deployments
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS crop_id INTEGER;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS field_id INTEGER;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS user_id INTEGER;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS crop_name TEXT;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS planting_date DATE;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS expected_harvest_date DATE;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS actual_harvest_date DATE;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS expected_yield_kg FLOAT;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS actual_yield_kg FLOAT;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS notes TEXT;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
     
     # marketprice table
     cursor.execute("""
@@ -197,13 +250,15 @@ def create_tables():
                    status TEXT NOT NULL CHECK (status IN ('to be delivered', 'delivered', 'cancelled', 'returned')),
                    notes TEXT,
                    total_quantity_kg FLOAT,
+                   total_revenue_php FLOAT DEFAULT 0,
                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                    )
             """)
     
-    # Add delivery_time column for existing deployments
+    # Add delivery_time and total_revenue_php columns for existing deployments
     cursor.execute("ALTER TABLE delivery ADD COLUMN IF NOT EXISTS delivery_time TIME DEFAULT '09:00:00';")
+    cursor.execute("ALTER TABLE delivery ADD COLUMN IF NOT EXISTS total_revenue_php FLOAT DEFAULT 0;")
     
     # delivery items table
     cursor.execute("""

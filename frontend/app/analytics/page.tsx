@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTheme } from "../components/ThemeProvider";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   TrendingUp,
   TrendingDown,
@@ -29,12 +29,10 @@ const mockData = {
     revenueChange: 12.5,
     totalYield: 12450,
     yieldChange: 8.3,
-    activeFields: 12,
+    totalFields: 12,
     fieldsChange: 2,
-    avgCropHealth: 87,
-    healthChange: 5.2,
-    profitEstimate: 28500,
-    profitChange: 15.2,
+    totalRiceVarieties: 5,
+    varietiesChange: 0,
   },
   // Rice variants performance (as per specification - focused on rice crops)
   riceVariants: [
@@ -69,11 +67,11 @@ const mockData = {
   ],
   // Yield trends
   yieldTrends: [
-    { period: "Q1 2024", yield: 2800, profit: 12000 },
-    { period: "Q2 2024", yield: 3100, profit: 13500 },
-    { period: "Q3 2024", yield: 2900, profit: 12800 },
-    { period: "Q4 2024", yield: 3300, profit: 14500 },
-    { period: "Q1 2025", yield: 3500, profit: 15200 },
+    { period: "Q1 2024", yield: 2800, revenue: 12000 },
+    { period: "Q2 2024", yield: 3100, revenue: 13500 },
+    { period: "Q3 2024", yield: 2900, revenue: 12800 },
+    { period: "Q4 2024", yield: 3300, revenue: 14500 },
+    { period: "Q1 2025", yield: 3500, revenue: 15200 },
   ],
   // High-performing crops by location
   topByLocation: [
@@ -118,10 +116,407 @@ const mockData = {
 
 export default function AnalyticsPage() {
   const { theme } = useTheme();
-  const [selectedPeriod, setSelectedPeriod] = useState<"week" | "month" | "year">("month");
+  const [selectedPeriod, setSelectedPeriod] = useState<"week" | "month" | "year" | "overall">("month");
   const [viewMode, setViewMode] = useState<"location" | "season">("location");
+  const [fieldDistribution, setFieldDistribution] = useState<any[]>([]);
+  const [overviewData, setOverviewData] = useState({
+    totalRevenue: 0,
+    revenueChange: 0,
+    totalYield: 0,
+    yieldChange: 0,
+    totalFields: 0,
+    fieldsChange: 0,
+    totalRiceVarieties: 0,
+    varietiesChange: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [monthlySalesData, setMonthlySalesData] = useState<Array<{ month: string; sales: number; quantity: number }>>([]);
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [salesByMonthYear, setSalesByMonthYear] = useState<{ [key: string]: { sales: number; quantity: number } }>({});
+  const [riceVariantsData, setRiceVariantsData] = useState<any[]>([]);
+  const [yieldTrendsData, setYieldTrendsData] = useState<Array<{ period: string; yield: number; revenue: number }>>([]);
+  const [allDeliveries, setAllDeliveries] = useState<any[]>([]);
+  const [allHarvestHistory, setAllHarvestHistory] = useState<any[]>([]);
 
   const isDark = theme === "dark";
+
+  // Fetch field distribution and overview data from backend
+  useEffect(() => {
+    const fetchAnalyticsData = async () => {
+      try {
+        setLoading(true);
+        
+        // Get auth token and user from localStorage
+        const token = localStorage.getItem("auth_token") || localStorage.getItem("token");
+        const uRaw = localStorage.getItem("user");
+        const u = uRaw ? JSON.parse(uRaw) : null;
+        
+        if (!token || !u?.id) {
+          setLoading(false);
+          return;
+        }
+
+        const headers = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        };
+        
+        // Fetch fields
+        const fieldsResponse = await fetch(`http://localhost:5001/api/fields?user_id=${u.id}`, { headers });
+        let fields = [];
+        if (fieldsResponse.ok) {
+          const fieldsData = await fieldsResponse.json();
+          fields = fieldsData.fields || [];
+        }
+
+        // Fetch crops
+        const cropsResponse = await fetch(`http://localhost:5001/api/crops?user_id=${u.id}`, { headers });
+        let crops = [];
+        if (cropsResponse.ok) {
+          const cropsData = await cropsResponse.json();
+          crops = cropsData.crops || [];
+        }
+
+        // Fetch inventory
+        const inventoryResponse = await fetch(`http://localhost:5001/api/inventory?user_id=${u.id}`, { headers });
+        let inventory = [];
+        if (inventoryResponse.ok) {
+          const inventoryData = await inventoryResponse.json();
+          inventory = inventoryData.inventory_items || [];
+        }
+
+        // Fetch deliveries
+        const deliveriesResponse = await fetch(`http://localhost:5001/api/deliveries?user_id=${u.id}`, { headers });
+        let deliveries = [];
+        if (deliveriesResponse.ok) {
+          const deliveriesData = await deliveriesResponse.json();
+          deliveries = deliveriesData.deliveries || [];
+        }
+
+        // Fetch crop harvest history
+        const harvestHistoryResponse = await fetch(`http://localhost:5001/api/harvest-history?user_id=${u.id}`, { headers });
+        let harvestHistory = [];
+        if (harvestHistoryResponse.ok) {
+          const historyData = await harvestHistoryResponse.json();
+          harvestHistory = historyData.harvest_history || [];
+        }
+
+        // Calculate overview statistics
+        const totalRevenue = Array.isArray(deliveries)
+          ? deliveries.reduce((sum: number, d: any) => sum + (d.total_revenue_php || 0), 0)
+          : 0;
+        const totalYield = Array.isArray(harvestHistory)
+          ? harvestHistory.reduce((sum: number, h: any) => sum + (h.actual_yield_kg || 0), 0)
+          : 0;
+        const totalFields = Array.isArray(fields) ? fields.length : 0;
+        const uniqueVarieties = new Set(crops.map((c: any) => c.name));
+        const totalRiceVarieties = uniqueVarieties.size;
+
+        setOverviewData({
+          totalRevenue,
+          revenueChange: 0,
+          totalYield,
+          yieldChange: 0,
+          totalFields,
+          fieldsChange: 0,
+          totalRiceVarieties,
+          varietiesChange: 0,
+        });
+
+        // Process deliveries for historical sales data
+        const salesByMonthYear: { [key: string]: { sales: number; quantity: number } } = {};
+        const yearsSet = new Set<number>();
+        
+        deliveries.forEach((delivery: any) => {
+          if (delivery.delivery_date && delivery.total_revenue_php) {
+            const date = new Date(delivery.delivery_date);
+            const year = date.getFullYear();
+            const month = date.getMonth(); // 0-11
+            const key = `${year}-${month}`;
+            
+            yearsSet.add(year);
+            
+            if (!salesByMonthYear[key]) {
+              salesByMonthYear[key] = { sales: 0, quantity: 0 };
+            }
+            
+            salesByMonthYear[key].sales += delivery.total_revenue_php || 0;
+            salesByMonthYear[key].quantity += delivery.total_quantity_kg || 0;
+          }
+        });
+
+        // Store sales data in state
+        setSalesByMonthYear(salesByMonthYear);
+
+        // Extract and sort years
+        const years = Array.from(yearsSet).sort((a, b) => b - a);
+        setAvailableYears(years);
+        
+        // Set selected year to the most recent year with data, or current year
+        if (years.length > 0 && !years.includes(selectedYear)) {
+          setSelectedYear(years[0]);
+        }
+
+        // Map fields with their crop info and market prices for field distribution
+        const fieldsWithDetails = fields.map((field: any) => {
+          // Find crops for this field
+          const fieldCrops = crops.filter((c: any) => c.field_id === field.id);
+          const primaryCrop = fieldCrops[0];
+          
+          // Find market price from inventory
+          let marketPrice = 0;
+          if (primaryCrop) {
+            const inventoryItem = inventory.find((inv: any) => inv.name === primaryCrop.name);
+            marketPrice = inventoryItem?.price_per_unit || 0;
+          }
+
+          return {
+            name: field.name,
+            area: field.area_ha,
+            variant: primaryCrop?.name || "Unknown",
+            status: primaryCrop?.health_status || "Unknown",
+            location: field.location || "Unknown",
+            marketPrice: marketPrice,
+          };
+        });
+
+        setFieldDistribution(fieldsWithDetails);
+
+        // Process crop harvest history for rice variants performance
+        // Group by variant name and season, combining yields and averaging health
+        const variantMap = new Map<string, any>();
+        
+        harvestHistory.forEach((harvest: any) => {
+          // Determine season from actual_harvest_date
+          let season = "Unknown";
+          if (harvest.actual_harvest_date) {
+            const harvestDate = new Date(harvest.actual_harvest_date);
+            const month = harvestDate.getMonth() + 1; // 1-12
+            
+            // Wet season: June (6) to November (11)
+            // Dry season: December (12) to May (5)
+            if (month >= 6 && month <= 11) {
+              season = "Wet Season";
+            } else {
+              season = "Dry Season";
+            }
+          }
+
+          // Calculate health percentage: (actual_yield_kg / expected_yield_kg) * 100, max 100%
+          let health = 0;
+          if (harvest.expected_yield_kg && harvest.expected_yield_kg > 0) {
+            const healthPercent = (harvest.actual_yield_kg || 0) / harvest.expected_yield_kg * 100;
+            health = Math.min(healthPercent, 100);
+          }
+
+          // Create unique key combining variant name and season
+          const key = `${harvest.crop_name}-${season}`;
+          
+          if (variantMap.has(key)) {
+            // Combine with existing entry
+            const existing = variantMap.get(key);
+            existing.yield += harvest.actual_yield_kg || 0;
+            existing.healthValues.push(health);
+            existing.count += 1;
+          } else {
+            // Create new entry
+            variantMap.set(key, {
+              name: harvest.crop_name,
+              yield: harvest.actual_yield_kg || 0,
+              revenue: 0, // Empty initially
+              healthValues: [health],
+              area: 0, // Empty initially
+              pricePerKg: 0, // Empty initially
+              location: "", // Empty initially
+              season: season,
+              count: 1,
+            });
+          }
+        });
+
+        // Convert map to array and calculate average health
+        const processedVariants = Array.from(variantMap.values()).map(variant => {
+          const avgHealth = variant.healthValues.reduce((sum: number, h: number) => sum + h, 0) / variant.healthValues.length;
+          return {
+            name: variant.name,
+            yield: variant.yield,
+            revenue: variant.revenue,
+            health: Math.round(avgHealth),
+            area: variant.area,
+            pricePerKg: variant.pricePerKg,
+            location: variant.location,
+            season: variant.season,
+          };
+        });
+
+        setRiceVariantsData(processedVariants);
+
+        // Process yield trends by quarter
+        const yieldByQuarter: { [key: string]: { yield: number; revenue: number } } = {};
+        
+        // Process harvest history for yields by quarter
+        harvestHistory.forEach((harvest: any) => {
+          if (harvest.actual_harvest_date && harvest.actual_yield_kg) {
+            const date = new Date(harvest.actual_harvest_date);
+            const year = date.getFullYear();
+            const month = date.getMonth(); // 0-11
+            const quarter = Math.floor(month / 3) + 1; // 1-4
+            const key = `Q${quarter} ${year}`;
+            
+            if (!yieldByQuarter[key]) {
+              yieldByQuarter[key] = { yield: 0, revenue: 0 };
+            }
+            
+            yieldByQuarter[key].yield += harvest.actual_yield_kg || 0;
+          }
+        });
+        
+        // Process deliveries for revenue by quarter
+        deliveries.forEach((delivery: any) => {
+          if (delivery.delivery_date && delivery.total_revenue_php) {
+            const date = new Date(delivery.delivery_date);
+            const year = date.getFullYear();
+            const month = date.getMonth(); // 0-11
+            const quarter = Math.floor(month / 3) + 1; // 1-4
+            const key = `Q${quarter} ${year}`;
+            
+            if (!yieldByQuarter[key]) {
+              yieldByQuarter[key] = { yield: 0, revenue: 0 };
+            }
+            
+            yieldByQuarter[key].revenue += delivery.total_revenue_php || 0;
+          }
+        });
+        
+        // Convert to array and sort by period
+        const yieldTrends = Object.entries(yieldByQuarter)
+          .map(([period, data]) => ({
+            period,
+            yield: data.yield,
+            revenue: data.revenue,
+          }))
+          .sort((a, b) => {
+            // Extract year and quarter for sorting
+            const [qA, yearA] = a.period.split(' ');
+            const [qB, yearB] = b.period.split(' ');
+            const yearDiff = parseInt(yearA) - parseInt(yearB);
+            if (yearDiff !== 0) return yearDiff;
+            return parseInt(qA.substring(1)) - parseInt(qB.substring(1));
+          });
+        
+        setYieldTrendsData(yieldTrends);
+        setAllDeliveries(deliveries);
+        setAllHarvestHistory(harvestHistory);
+      } catch (error) {
+        console.error("Error fetching analytics data:", error);
+        // Fall back to mock data on error
+        setFieldDistribution(mockData.fieldDistribution);
+        setOverviewData(mockData.overview);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAnalyticsData();
+  }, []);
+
+  // Update overview stats based on selected period
+  useEffect(() => {
+    const now = new Date();
+    let filteredDeliveries = allDeliveries;
+    let filteredHarvests = allHarvestHistory;
+    let previousDeliveries = allDeliveries;
+    let previousHarvests = allHarvestHistory;
+
+    if (selectedPeriod === "week") {
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+      
+      filteredDeliveries = allDeliveries.filter((d: any) => new Date(d.delivery_date) >= weekAgo);
+      filteredHarvests = allHarvestHistory.filter((h: any) => new Date(h.actual_harvest_date) >= weekAgo);
+      
+      previousDeliveries = allDeliveries.filter((d: any) => {
+        const date = new Date(d.delivery_date);
+        return date >= twoWeeksAgo && date < weekAgo;
+      });
+      previousHarvests = allHarvestHistory.filter((h: any) => {
+        const date = new Date(h.actual_harvest_date);
+        return date >= twoWeeksAgo && date < weekAgo;
+      });
+    } else if (selectedPeriod === "month") {
+      const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const twoMonthsAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+      
+      filteredDeliveries = allDeliveries.filter((d: any) => new Date(d.delivery_date) >= monthAgo);
+      filteredHarvests = allHarvestHistory.filter((h: any) => new Date(h.actual_harvest_date) >= monthAgo);
+      
+      previousDeliveries = allDeliveries.filter((d: any) => {
+        const date = new Date(d.delivery_date);
+        return date >= twoMonthsAgo && date < monthAgo;
+      });
+      previousHarvests = allHarvestHistory.filter((h: any) => {
+        const date = new Date(h.actual_harvest_date);
+        return date >= twoMonthsAgo && date < monthAgo;
+      });
+    } else if (selectedPeriod === "year") {
+      const yearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+      const twoYearsAgo = new Date(now.getTime() - 730 * 24 * 60 * 60 * 1000);
+      
+      filteredDeliveries = allDeliveries.filter((d: any) => new Date(d.delivery_date) >= yearAgo);
+      filteredHarvests = allHarvestHistory.filter((h: any) => new Date(h.actual_harvest_date) >= yearAgo);
+      
+      previousDeliveries = allDeliveries.filter((d: any) => {
+        const date = new Date(d.delivery_date);
+        return date >= twoYearsAgo && date < yearAgo;
+      });
+      previousHarvests = allHarvestHistory.filter((h: any) => {
+        const date = new Date(h.actual_harvest_date);
+        return date >= twoYearsAgo && date < yearAgo;
+      });
+    }
+
+    const periodRevenue = Array.isArray(filteredDeliveries)
+      ? filteredDeliveries.reduce((sum: number, d: any) => sum + (d.total_revenue_php || 0), 0)
+      : 0;
+    const periodYield = Array.isArray(filteredHarvests)
+      ? filteredHarvests.reduce((sum: number, h: any) => sum + (h.actual_yield_kg || 0), 0)
+      : 0;
+
+    const previousRevenue = Array.isArray(previousDeliveries)
+      ? previousDeliveries.reduce((sum: number, d: any) => sum + (d.total_revenue_php || 0), 0)
+      : 0;
+    const previousYield = Array.isArray(previousHarvests)
+      ? previousHarvests.reduce((sum: number, h: any) => sum + (h.actual_yield_kg || 0), 0)
+      : 0;
+
+    // Calculate percentage changes
+    const revenueChange = previousRevenue > 0 ? ((periodRevenue - previousRevenue) / previousRevenue) * 100 : 0;
+    const yieldChange = previousYield > 0 ? ((periodYield - previousYield) / previousYield) * 100 : 0;
+
+    setOverviewData((prev) => ({
+      ...prev,
+      totalRevenue: periodRevenue,
+      totalYield: periodYield,
+      revenueChange: selectedPeriod === "overall" ? 0 : Math.round(revenueChange * 10) / 10,
+      yieldChange: selectedPeriod === "overall" ? 0 : Math.round(yieldChange * 10) / 10,
+    }));
+  }, [selectedPeriod, allDeliveries, allHarvestHistory]);
+
+  // Update monthly sales data when selected year changes
+  useEffect(() => {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthlyData = months.map((month, index) => {
+      const key = `${selectedYear}-${index}`;
+      const data = salesByMonthYear[key] || { sales: 0, quantity: 0 };
+      return {
+        month,
+        sales: data.sales,
+        quantity: data.quantity,
+      };
+    });
+    setMonthlySalesData(monthlyData);
+  }, [selectedYear, salesByMonthYear]);
 
   const StatCard = ({
     title,
@@ -182,7 +577,7 @@ export default function AnalyticsPage() {
 
           {/* Period Selector */}
           <div className="flex gap-2 mb-6">
-            {(["week", "month", "year"] as const).map((period) => (
+            {(["week", "month", "year", "overall"] as const).map((period) => (
               <button
                 key={period}
                 onClick={() => setSelectedPeriod(period)}
@@ -195,7 +590,7 @@ export default function AnalyticsPage() {
                       : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200"
                   }`}
               >
-                {period.charAt(0).toUpperCase() + period.slice(1)}
+                {period === "overall" ? "Overall" : period.charAt(0).toUpperCase() + period.slice(1)}
               </button>
             ))}
           </div>
@@ -204,30 +599,30 @@ export default function AnalyticsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <StatCard
               title="Total Revenue"
-              value={mockData.overview.totalRevenue}
-              change={mockData.overview.revenueChange}
+              value={overviewData.totalRevenue}
+              change={overviewData.revenueChange}
               icon={DollarSign}
               iconColor="bg-green-100"
             />
             <StatCard
               title="Total Yield"
-              value={mockData.overview.totalYield}
-              change={mockData.overview.yieldChange}
+              value={overviewData.totalYield}
+              change={overviewData.yieldChange}
               icon={Package}
               iconColor="bg-blue-100"
             />
             <StatCard
-              title="Profit Estimate"
-              value={mockData.overview.profitEstimate}
-              change={mockData.overview.profitChange}
-              icon={TrendingUpIcon}
+              title="Total Rice Varieties Tracked"
+              value={overviewData.totalRiceVarieties}
+              change={overviewData.varietiesChange}
+              icon={Sprout}
               iconColor="bg-purple-100"
             />
             <StatCard
-              title="Avg Crop Health"
-              value={`${mockData.overview.avgCropHealth}%`}
-              change={mockData.overview.healthChange}
-              icon={BarChart3}
+              title="Total Fields"
+              value={overviewData.totalFields}
+              change={overviewData.fieldsChange}
+              icon={MapPin}
               iconColor="bg-yellow-100"
             />
           </div>
@@ -297,33 +692,66 @@ export default function AnalyticsPage() {
                 isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
               } rounded-2xl shadow-lg border p-6`}
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-4">
                 <h2 className={`text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
                   Historical Sales Data
                 </h2>
                 <BarChart3 className={`w-5 h-5 ${isDark ? "text-slate-400" : "text-slate-600"}`} />
               </div>
+              
+              {/* Year Selector */}
+              {availableYears.length > 0 && (
+                <div className="flex gap-2 mb-6 flex-wrap">
+                  {availableYears.map((year) => (
+                    <button
+                      key={year}
+                      onClick={() => setSelectedYear(year)}
+                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-all
+                        ${selectedYear === year
+                          ? "bg-gradient-to-r from-green-500 to-green-600 text-white shadow-md"
+                          : isDark
+                            ? "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
+                    >
+                      {year}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="space-y-3">
-                {mockData.monthlySales.map((item, index) => (
-                  <div key={index} className="flex items-center gap-4">
-                    <div className="w-12 text-sm font-medium text-slate-600 dark:text-slate-400">
-                      {item.month}
-                    </div>
-                    <div className="flex-1 relative">
-                      <div
-                        className={`h-8 rounded-lg bg-gradient-to-r from-green-500 to-green-600 flex items-center justify-end pr-2`}
-                        style={{ width: `${(item.sales / maxSales) * 100}%` }}
-                      >
-                        <span className="text-xs font-medium text-white">
-                          ₱{(item.sales / 1000).toFixed(1)}k
-                        </span>
+                {monthlySalesData.length > 0 ? (
+                  monthlySalesData.map((item, index) => {
+                    const maxSales = Math.max(...monthlySalesData.map((m) => m.sales), 1);
+                    return (
+                      <div key={index} className="flex items-center gap-4">
+                        <div className="w-12 text-sm font-medium text-slate-600 dark:text-slate-400">
+                          {item.month}
+                        </div>
+                        <div className="flex-1 relative">
+                          <div
+                            className={`h-8 rounded-lg bg-gradient-to-r from-green-500 to-green-600 flex items-center justify-end pr-2`}
+                            style={{ width: `${item.sales > 0 ? (item.sales / maxSales) * 100 : 0}%`, minWidth: item.sales > 0 ? '40px' : '0' }}
+                          >
+                            {item.sales > 0 && (
+                              <span className="text-xs font-medium text-white">
+                                ₱{item.sales >= 1000 ? (item.sales / 1000).toFixed(1) + 'k' : item.sales.toFixed(0)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-500 w-20 text-right">
+                          {item.quantity > 0 ? `${item.quantity.toFixed(0)} kg` : '—'}
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-xs text-slate-500 w-16 text-right">
-                      {item.quantity} kg
-                    </div>
+                    );
+                  })
+                ) : (
+                  <div className={`text-center py-8 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                    No sales data available for {selectedYear}
                   </div>
-                ))}
+                )}
               </div>
             </div>
 
@@ -335,36 +763,42 @@ export default function AnalyticsPage() {
             >
               <div className="flex items-center justify-between mb-6">
                 <h2 className={`text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
-                  Yield Trends & Profit Estimates
+                  Yield Trends & Revenue Estimates
                 </h2>
                 <TrendingUpIcon className={`w-5 h-5 ${isDark ? "text-slate-400" : "text-slate-600"}`} />
               </div>
               <div className="space-y-4">
-                {mockData.yieldTrends.map((trend, index) => (
-                  <div
-                    key={index}
-                    className={`p-4 rounded-xl border ${
-                      isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
-                        {trend.period}
-                      </span>
-                      <span className={`text-sm font-medium ${isDark ? "text-green-400" : "text-green-600"}`}>
-                        ₱{trend.profit.toLocaleString()}
-                      </span>
+                {yieldTrendsData.length > 0 ? (
+                  yieldTrendsData.map((trend, index) => (
+                    <div
+                      key={index}
+                      className={`p-4 rounded-xl border ${
+                        isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
+                          {trend.period}
+                        </span>
+                        <span className={`text-sm font-medium ${isDark ? "text-green-400" : "text-green-600"}`}>
+                          ₱{trend.revenue.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className={isDark ? "text-slate-400" : "text-slate-600"}>
+                          Yield: <span className="font-medium">{trend.yield.toLocaleString()} kg</span>
+                        </span>
+                        <span className={isDark ? "text-slate-400" : "text-slate-600"}>
+                          Revenue: <span className="font-medium text-green-600">₱{trend.revenue.toLocaleString()}</span>
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4 text-sm">
-                      <span className={isDark ? "text-slate-400" : "text-slate-600"}>
-                        Yield: <span className="font-medium">{trend.yield.toLocaleString()} kg</span>
-                      </span>
-                      <span className={isDark ? "text-slate-400" : "text-slate-600"}>
-                        Profit: <span className="font-medium text-green-600">₱{trend.profit.toLocaleString()}</span>
-                      </span>
-                    </div>
+                  ))
+                ) : (
+                  <div className={`text-center py-8 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                    No yield trend data available
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </div>
@@ -416,7 +850,7 @@ export default function AnalyticsPage() {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <h3 className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
-                      {viewMode === "location" ? item.location : item.season}
+                      {viewMode === "location" && "location" in item ? item.location : "season" in item ? item.season : ""}
                     </h3>
                     <span
                       className={`px-2 py-1 rounded-lg text-xs font-medium ${
@@ -469,15 +903,6 @@ export default function AnalyticsPage() {
                       Yield (kg)
                     </th>
                     <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                      Revenue
-                    </th>
-                    <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                      Price/kg
-                    </th>
-                    <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                      Location
-                    </th>
-                    <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
                       Season
                     </th>
                     <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
@@ -486,47 +911,43 @@ export default function AnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {mockData.riceVariants.map((variant, index) => (
-                    <tr
-                      key={index}
-                      className={`border-b ${isDark ? "border-slate-700 hover:bg-slate-700/50" : "border-slate-100 hover:bg-slate-50"} transition-colors`}
-                    >
-                      <td className={`py-3 px-4 font-medium ${isDark ? "text-white" : "text-slate-900"}`}>
-                        {variant.name}
-                      </td>
-                      <td className={`py-3 px-4 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                        {variant.yield.toLocaleString()}
-                      </td>
-                      <td className={`py-3 px-4 font-semibold ${isDark ? "text-green-400" : "text-green-600"}`}>
-                        ₱{variant.revenue.toLocaleString()}
-                      </td>
-                      <td className={`py-3 px-4 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                        ₱{variant.pricePerKg}
-                      </td>
-                      <td className={`py-3 px-4 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                        <div className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          {variant.location}
-                        </div>
-                      </td>
-                      <td className={`py-3 px-4 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                        {variant.season}
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-slate-200 dark:bg-slate-700 rounded-full h-2">
-                            <div
-                              className="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full"
-                              style={{ width: `${variant.health}%` }}
-                            />
+                  {riceVariantsData.length > 0 ? (
+                    riceVariantsData.map((variant, index) => (
+                      <tr
+                        key={index}
+                        className={`border-b ${isDark ? "border-slate-700 hover:bg-slate-700/50" : "border-slate-100 hover:bg-slate-50"} transition-colors`}
+                      >
+                        <td className={`py-3 px-4 font-medium ${isDark ? "text-white" : "text-slate-900"}`}>
+                          {variant.name}
+                        </td>
+                        <td className={`py-3 px-4 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          {variant.yield.toLocaleString()}
+                        </td>
+                        <td className={`py-3 px-4 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          {variant.season}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-slate-200 dark:bg-slate-700 rounded-full h-2 max-w-xs">
+                              <div
+                                className="bg-gradient-to-r from-green-500 to-green-600 h-2 rounded-full"
+                                style={{ width: `${variant.health}%` }}
+                              />
+                            </div>
+                            <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                              {variant.health}%
+                            </span>
                           </div>
-                          <span className={`text-sm font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                            {variant.health}%
-                          </span>
-                        </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className={`py-6 text-center ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                        No rice variant data available
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
@@ -600,7 +1021,16 @@ export default function AnalyticsPage() {
                 <Calendar className={`w-5 h-5 ${isDark ? "text-slate-400" : "text-slate-600"}`} />
               </div>
               <div className="space-y-4">
-                {mockData.fieldDistribution.map((field, index) => (
+                {loading ? (
+                  <div className={`text-center py-8 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                    Loading field data...
+                  </div>
+                ) : fieldDistribution.length === 0 ? (
+                  <div className={`text-center py-8 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                    No fields found
+                  </div>
+                ) : (
+                  fieldDistribution.map((field, index) => (
                   <div
                     key={index}
                     className={`p-4 rounded-xl border ${
@@ -645,7 +1075,8 @@ export default function AnalyticsPage() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 

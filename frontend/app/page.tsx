@@ -20,7 +20,8 @@ export default function Home() {
   });
 
   const [ready, setReady] = useState(false);
-  const [user, setUser] = useState<{ name?: string; role?: string } | null>(null);
+  const [user, setUser] = useState<{ id?: number; name?: string; role?: string } | null>(null);
+  const [stats, setStats] = useState({ totalFields: 0, activeCrops: 0, harvestYieldKg: 0, totalRevenuePhp: 0 });
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
@@ -58,6 +59,66 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const uRaw = localStorage.getItem('user');
+        const u = uRaw ? JSON.parse(uRaw) : null;
+        if (!token || !u?.id) return;
+
+        const headers: any = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+        // Total fields
+        const fieldsRes = await fetch(`http://localhost:5001/api/fields?user_id=${u.id}`, { headers });
+        let totalFields = 0;
+        if (fieldsRes.ok) {
+          const j = await fieldsRes.json().catch(() => ({}));
+          const fields = j.fields || [];
+          totalFields = Array.isArray(fields) ? fields.length : 0;
+        }
+
+        // Active crops are crops that have a planting_date
+        const cropsRes = await fetch(`http://localhost:5001/api/crops?user_id=${u.id}`, { headers });
+        let activeCrops = 0;
+        if (cropsRes.ok) {
+          const cj = await cropsRes.json().catch(() => ({}));
+          const crops = cj.crops || [];
+          activeCrops = Array.isArray(crops) ? crops.filter((c: any) => !!c.planting_date).length : 0;
+        }
+
+        // Harvest yield from history
+        const harvestRes = await fetch(`http://localhost:5001/api/harvest-history?user_id=${u.id}`, { headers });
+        let harvestYieldKg = 0;
+        if (harvestRes.ok) {
+          const hj = await harvestRes.json().catch(() => ({}));
+          const history = hj.harvest_history || [];
+          harvestYieldKg = Array.isArray(history)
+            ? history.reduce((sum: number, h: any) => sum + (h.actual_yield_kg || 0), 0)
+            : 0;
+        }
+
+        // Total revenue from delivered deliveries
+        const deliveriesRes = await fetch(`http://localhost:5001/api/deliveries?user_id=${u.id}`, { headers });
+        let totalRevenuePhp = 0;
+        if (deliveriesRes.ok) {
+          const dj = await deliveriesRes.json().catch(() => ({}));
+          const deliveries = dj.deliveries || [];
+          totalRevenuePhp = Array.isArray(deliveries)
+            ? deliveries
+                .filter((d: any) => d.status === 'delivered')
+                .reduce((sum: number, d: any) => sum + (d.total_revenue_php || 0), 0)
+            : 0;
+        }
+
+        setStats({ totalFields, activeCrops, harvestYieldKg, totalRevenuePhp });
+      } catch (e) {
+        // swallow errors for dashboard
+      }
+    };
+    if (auth) loadStats();
+  }, [auth]);
+
   const handleSignOut = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -88,7 +149,7 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className={`${isDark ? "text-slate-400" : "text-slate-600"} text-sm font-medium`}>Total Fields</p>
-                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>12</p>
+                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>{stats.totalFields}</p>
                 </div>
                 <div className={`${isDark ? "bg-green-900/30" : "bg-green-100"} w-12 h-12 rounded-xl flex items-center justify-center`}>
                   <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -102,7 +163,7 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className={`${isDark ? "text-slate-400" : "text-slate-600"} text-sm font-medium`}>Active Crops</p>
-                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>8</p>
+                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>{stats.activeCrops}</p>
                 </div>
                 <div className={`${isDark ? "bg-blue-900/30" : "bg-blue-100"} w-12 h-12 rounded-xl flex items-center justify-center`}>
                   <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -116,7 +177,7 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className={`${isDark ? "text-slate-400" : "text-slate-600"} text-sm font-medium`}>Harvest Yield</p>
-                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>2.4k kg</p>
+                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>{stats.harvestYieldKg.toLocaleString()} kg</p>
                 </div>
                 <div className={`${isDark ? "bg-yellow-900/30" : "bg-yellow-100"} w-12 h-12 rounded-xl flex items-center justify-center`}>
                   <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -130,7 +191,9 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className={`${isDark ? "text-slate-400" : "text-slate-600"} text-sm font-medium`}>Revenue</p>
-                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>$12.5k</p>
+                  <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>{
+                    (stats.totalRevenuePhp || 0).toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })
+                  }</p>
                 </div>
                 <div className={`${isDark ? "bg-purple-900/30" : "bg-purple-100"} w-12 h-12 rounded-xl flex items-center justify-center`}>
                   <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

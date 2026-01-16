@@ -10,6 +10,12 @@ interface FieldData {
   crop: string;
   coordinates: [number, number][];
   center: [number, number];
+  area_ha?: number | null;
+  status?: string | null;
+  city?: string | null;
+  state?: string | null;
+  planting_date?: string | null;
+  health_status?: string | null;
 }
 
 interface LeafletMapProps {
@@ -59,30 +65,6 @@ export default function LeafletMap({ center, isDrawingMode = false, onPolygonCom
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19,
       }).addTo(map);
-
-      // Add agricultural area markers in the Philippines
-      const agriculturalAreas = [
-        { name: "Central Luzon", coords: [15.4828, 120.5848], type: "Rice" },
-        { name: "Cagayan Valley", coords: [17.6129, 121.7265], type: "Rice & Corn" },
-        { name: "Mindanao", coords: [7.9644, 123.6253], type: "Various Crops" },
-        { name: "Bicol Region", coords: [13.4210, 123.2911], type: "Coconuts & Rice" },
-        { name: "Ilocos Region", coords: [16.5670, 120.3977], type: "Rice & Tobacco" },
-        { name: "Visayas", coords: [10.3157, 123.8854], type: "Sugar & Rice" },
-      ];
-
-      agriculturalAreas.forEach((area) => {
-        L.marker(area.coords as L.LatLngExpression, {
-          icon: L.icon({
-            iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
-            shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png",
-            iconSize: [25, 41],
-            iconAnchor: [12, 41],
-          }),
-        })
-          .addTo(map)
-          .bindPopup(`<b>${area.name}</b><br/>Crops: ${area.type}`);
-      });
-
 
       mapInstanceRef.current = map;
       
@@ -260,35 +242,44 @@ export default function LeafletMap({ center, isDrawingMode = false, onPolygonCom
     }
   }, [currentPolygonPoints, isDrawingMode]);
 
-  // Effect to display saved fields as polygons - DISABLED for now
-  // useEffect(() => {
-  //   if (!mapInstanceRef.current) return;
+  // Effect to display saved fields as markers
+  const savedMarkersRef = useRef<L.Marker[]>([]);
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
 
-  //   // Remove existing saved polygons
-  //   savedPolygonsRef.current.forEach(polygon => polygon.remove());
-  //   savedPolygonsRef.current = [];
+    // Remove existing saved field markers
+    savedMarkersRef.current.forEach(marker => marker.remove());
+    savedMarkersRef.current = [];
 
-  //   if (savedFields.length === 0) return;
+    if (savedFields.length === 0) return;
 
-  //   // Add polygons for each saved field
-  //   savedFields.forEach((field) => {
-  //     const polygonPoints = field.coordinates.map(p => [p[0], p[1]] as L.LatLngExpression);
-  //     // Close the polygon
-  //     polygonPoints.push(polygonPoints[0]);
+    // Add markers for each saved field
+    savedFields.forEach((field) => {
+      if (!field.center || field.center[0] === 0 && field.center[1] === 0) return;
 
-  //     const polygon = L.polygon(polygonPoints, {
-  //       color: '#22c55e',
-  //       weight: 3,
-  //       fillColor: '#22c55e',
-  //       fillOpacity: 0.3,
-  //     }).addTo(mapInstanceRef.current!);
+      const marker = L.marker(field.center as L.LatLngExpression, {
+        icon: L.icon({
+          iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
+          shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png",
+          iconSize: [25, 41],
+          iconAnchor: [12, 41],
+        }),
+      }).addTo(mapInstanceRef.current!);
 
-  //     // Add popup with field information
-  //     polygon.bindPopup(`<b>${field.name}</b><br/>Crop: ${field.crop}`);
+      // Build popup content based on field status
+      let popupContent = `<b>${field.name}</b>`;
+      if (field.status !== 'available' && field.crop) {
+        popupContent += `<br/>Crop: ${field.crop}`;
+      }
+      popupContent += `<br/>Status: ${field.status || 'available'}`;
+      if (field.area_ha) {
+        popupContent += `<br/>Area: ${field.area_ha} ha`;
+      }
 
-  //     savedPolygonsRef.current.push(polygon);
-  //   });
-  // }, [savedFields]);
+      marker.bindPopup(popupContent);
+      savedMarkersRef.current.push(marker);
+    });
+  }, [savedFields]);
 
   return <div ref={mapRef} className="absolute inset-0" style={{ minHeight: "600px" }} />;
 }

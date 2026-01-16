@@ -327,6 +327,9 @@ export default function FieldDetailPage() {
     name: string;
     planting_date: string | null;
     expected_harvest_date: string | null;
+    actual_harvest_date: string | null;
+    expected_yield_kg: number | null;
+    actual_yield_kg: number | null;
     health_status: string | null;
     notes: string;
   } | null>(null);
@@ -336,6 +339,16 @@ export default function FieldDetailPage() {
   const [isSavingName, setIsSavingName] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+  const [isPlantCropModalOpen, setIsPlantCropModalOpen] = useState(false);
+  const [plantCropForm, setPlantCropForm] = useState({
+    cropName: "",
+    plantingDate: "",
+    expectedYield: "",
+  });
+  const [isSavingCrop, setIsSavingCrop] = useState(false);
+  const [plantCropError, setPlantCropError] = useState<string | null>(null);
+  const [availableCrops, setAvailableCrops] = useState<string[]>([]);
+  const [isLoadingCrops, setIsLoadingCrops] = useState(false);
 
   const defaultFieldName = useMemo(() => {
     const fid = field?.id ?? fieldId;
@@ -419,6 +432,96 @@ export default function FieldDetailPage() {
     }
   };
 
+  const saveCrop = async () => {
+    const cropName = (plantCropForm.cropName || "").trim();
+    const plantingDate = plantCropForm.plantingDate.trim();
+    const expectedYield = plantCropForm.expectedYield.trim();
+
+    if (!cropName || !plantingDate || !expectedYield) {
+      setPlantCropError("All fields are required");
+      return;
+    }
+
+    const expectedYieldNum = parseFloat(expectedYield);
+    if (isNaN(expectedYieldNum) || expectedYieldNum <= 0) {
+      setPlantCropError("Expected yield must be a positive number");
+      return;
+    }
+
+    // Calculate expected harvest date as 120 days from planting date
+    const plantingDateObj = new Date(plantingDate);
+    const expectedHarvestDateObj = new Date(plantingDateObj);
+    expectedHarvestDateObj.setDate(expectedHarvestDateObj.getDate() + 120);
+    const expectedHarvestDate = expectedHarvestDateObj.toISOString().split('T')[0];
+
+    setIsSavingCrop(true);
+    setPlantCropError(null);
+    try {
+      const headers: any = { "Content-Type": "application/json" };
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`http://127.0.0.1:5001/api/crops`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          field_id: fieldId,
+          name: cropName,
+          planting_date: plantingDate,
+          expected_harvest_date: expectedHarvestDate,
+          expected_yield_kg: expectedYieldNum,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        setPlantCropError(text || "Failed to save crop");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const newCrop = data.crop ?? data;
+        setCrop({
+          name: newCrop.name || cropName,
+          planting_date: newCrop.planting_date || plantingDate,
+          expected_harvest_date: newCrop.expected_harvest_date || expectedHarvestDate,
+          actual_harvest_date: newCrop.actual_harvest_date || null,
+          expected_yield_kg: newCrop.expected_yield_kg ?? expectedYieldNum,
+          actual_yield_kg: newCrop.actual_yield_kg ?? null,
+          health_status: newCrop.health_status || "Good",
+          notes: newCrop.notes || "Crop just planted",
+        });
+        setIsPlantCropModalOpen(false);
+        setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "" });
+      }
+    } catch (err: any) {
+      setPlantCropError(err?.message || "Network error while saving crop");
+    } finally {
+      setIsSavingCrop(false);
+    }
+  };
+
+  const fetchAvailableCrops = async () => {
+    setIsLoadingCrops(true);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`http://localhost:5001/api/inventory/crops`, { headers });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const crops = (data.crops || []).map((c: any) => c.name || c).filter(Boolean);
+        setAvailableCrops(crops);
+        console.log("Loaded crops from inventory:", crops.length, "crops");
+      } else {
+        console.warn("Failed to fetch crops");
+      }
+    } catch (err) {
+      console.error("Error fetching crops:", err);
+    } finally {
+      setIsLoadingCrops(false);
+    }
+  };
+
   const updateCropPlantingDate = async (newPlantingDate: string) => {
     if (!crop || !crop.name) return;
 
@@ -447,21 +550,15 @@ export default function FieldDetailPage() {
         const updatedCropData = await updateRes.json().catch(() => ({}));
         const updatedCrop = updatedCropData.crop;
         if (updatedCrop) {
-          // Calculate expected harvest date (assume 120 days rice growing cycle)
-          let expectedHarvest = null;
-          if (updatedCrop.planting_date) {
-            const plantDate = new Date(updatedCrop.planting_date);
-            const harvestDate = new Date(plantDate);
-            harvestDate.setDate(harvestDate.getDate() + 120);
-            expectedHarvest = harvestDate.toISOString().slice(0, 10);
-          }
-
           setCrop({
             name: updatedCrop.name || crop.name,
             planting_date: updatedCrop.planting_date || null,
-            expected_harvest_date: expectedHarvest,
+            expected_harvest_date: updatedCrop.expected_harvest_date || null,
+            actual_harvest_date: updatedCrop.actual_harvest_date || null,
+            expected_yield_kg: updatedCrop.expected_yield_kg ?? null,
+            actual_yield_kg: updatedCrop.actual_yield_kg ?? null,
             health_status: updatedCrop.health_status || crop.health_status,
-            notes: crop.notes,
+            notes: updatedCrop.notes || crop.notes,
           });
         }
       }
@@ -641,21 +738,17 @@ export default function FieldDetailPage() {
           if (cropData.crops && Array.isArray(cropData.crops) && cropData.crops.length > 0) {
             const fetchedCrop = cropData.crops[0];
             
-            // Calculate expected harvest date (assume 120 days rice growing cycle)
-            let expectedHarvest = null;
-            if (fetchedCrop.planting_date) {
-              const plantDate = new Date(fetchedCrop.planting_date);
-              const harvestDate = new Date(plantDate);
-              harvestDate.setDate(harvestDate.getDate() + 120); // 120 days cycle
-              expectedHarvest = harvestDate.toISOString().slice(0, 10);
-            }
-
             setCrop({
               name: fetchedCrop.name || "Unknown Crop",
               planting_date: fetchedCrop.planting_date || null,
-              expected_harvest_date: expectedHarvest,
+              expected_harvest_date: fetchedCrop.expected_harvest_date || null,
+              actual_harvest_date: fetchedCrop.actual_harvest_date || null,
+              expected_yield_kg: fetchedCrop.expected_yield_kg ?? null,
+              actual_yield_kg: fetchedCrop.actual_yield_kg ?? null,
               health_status: fetchedCrop.health_status || "Unknown",
-              notes: "Crop data from database. Expected harvest calculated based on 120-day growing cycle.",
+              notes:
+                fetchedCrop.notes ||
+                "Crop data from database. Health status auto-derived from planting age when available.",
             });
             console.log("🌾 Crop data loaded:", fetchedCrop);
           } else {
@@ -761,6 +854,94 @@ export default function FieldDetailPage() {
               </div>
             )}
 
+            {isPlantCropModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+                <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6">
+                  <h2 className="text-lg font-semibold text-slate-900">Plant a Crop</h2>
+                  <p className="text-sm text-slate-500 mt-1">Enter the crop details to start a new planting cycle.</p>
+                  <div className="mt-4 space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-700" htmlFor="crop-name">Crop Name</label>
+                      <select
+                        id="crop-name"
+                        value={plantCropForm.cropName}
+                        onChange={(e) => {
+                          setPlantCropForm({ ...plantCropForm, cropName: e.target.value });
+                          setPlantCropError(null);
+                        }}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                      >
+                        <option value="">Select a crop...</option>
+                        {isLoadingCrops ? (
+                          <option disabled>Loading crops...</option>
+                        ) : availableCrops.length === 0 ? (
+                          <option disabled>No crops available in inventory</option>
+                        ) : (
+                          availableCrops.map((crop) => (
+                            <option key={crop} value={crop}>
+                              {crop}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-700" htmlFor="planting-date">Planting Date</label>
+                      <input
+                        id="planting-date"
+                        type="date"
+                        value={plantCropForm.plantingDate}
+                        onChange={(e) => {
+                          setPlantCropForm({ ...plantCropForm, plantingDate: e.target.value });
+                          setPlantCropError(null);
+                        }}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-700" htmlFor="expected-yield">Expected Yield (kg)</label>
+                      <input
+                        id="expected-yield"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={plantCropForm.expectedYield}
+                        onChange={(e) => {
+                          setPlantCropForm({ ...plantCropForm, expectedYield: e.target.value });
+                          setPlantCropError(null);
+                        }}
+                        placeholder="e.g., 500"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    {plantCropError && <p className="text-xs text-red-600">{plantCropError}</p>}
+                  </div>
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button
+                      onClick={() => {
+                        setIsPlantCropModalOpen(false);
+                        setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "" });
+                        setPlantCropError(null);
+                      }}
+                      className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={saveCrop}
+                      disabled={isSavingCrop}
+                      className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg shadow hover:bg-green-700 disabled:opacity-60"
+                    >
+                      {isSavingCrop ? "Planting..." : "Plant"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Main grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Weather card */}
@@ -854,19 +1035,31 @@ export default function FieldDetailPage() {
                   <>
                     <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
                       <div className="flex items-start justify-between">
-                        <div>
+                        <div className="space-y-1">
                           <h2 className="text-xl font-semibold text-slate-900">{crop.name}</h2>
-                          <p className="text-sm text-slate-500">Planting: <span className="font-medium">{crop.planting_date ? formatLongDate(crop.planting_date) : "Not set"}</span> • Harvest: <span className="font-medium">{crop.expected_harvest_date ? formatLongDate(crop.expected_harvest_date) : "Not calculated"}</span></p>
+                          <p className="text-sm text-slate-500">
+                            Planting: <span className="font-medium">{crop.planting_date ? formatLongDate(crop.planting_date) : "Not set"}</span>
+                            {/* {' '}|{' '}
+                            Expected Harvest: <span className="font-medium">{crop.expected_harvest_date ? formatLongDate(crop.expected_harvest_date) : "Not set"}</span>
+                            {' '}|{' '}
+                            Actual Harvest: <span className="font-medium">{crop.actual_harvest_date ? formatLongDate(crop.actual_harvest_date) : "Not recorded"}</span> */}
+                          </p>
+                          {/* <p className="text-sm text-slate-500">
+                            Expected Yield: <span className="font-medium">{crop.expected_yield_kg != null ? `${crop.expected_yield_kg} kg` : "Not set"}</span>
+                            {' '}|{' '}
+                            Actual Yield: <span className="font-medium">{crop.actual_yield_kg != null ? `${crop.actual_yield_kg} kg` : "Not recorded"}</span>
+                          </p> */}
                         </div>
-                        <div className="text-sm text-slate-500">
-                          <div className="mb-1"><strong>Status:</strong> <span className="font-medium">{plantingStatus}</span></div>
+                        <div className="text-sm text-slate-500 text-right">
+                          <div className="mb-1"><strong>Health:</strong> <span className="font-medium">{crop.health_status ?? "Unknown"}</span></div>
+                          <div className="mb-1"><strong>Age:</strong> <span className="font-medium">{plantingStatus}</span></div>
                           <div><strong>Area:</strong> <span className="font-medium">{field.area_ha} ha</span></div>
                         </div>
                       </div>
 
                       <div className="mt-4 text-sm text-slate-600">
                         <h4 className="font-medium mb-1">Notes</h4>
-                        <p className="leading-relaxed">{crop.notes}</p>
+                        <p className="leading-relaxed whitespace-pre-line">{crop.notes}</p>
                       </div>
                     </div>
 
@@ -882,7 +1075,20 @@ export default function FieldDetailPage() {
                   </>
                 ) : (
                   <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
-                    <p className="text-slate-500">No crop data available for this field.</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-slate-500">No crop data available for this field.</p>
+                      <button
+                        onClick={() => {
+                          setIsPlantCropModalOpen(true);
+                          setPlantCropError(null);
+                          setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "" });
+                          fetchAvailableCrops();
+                        }}
+                        className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg shadow hover:bg-green-700 transition-colors"
+                      >
+                        Plant a Crop
+                      </button>
+                    </div>
                   </div>
                 )}
 
