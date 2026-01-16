@@ -752,10 +752,10 @@ function ShareApp({ theme }: { theme: "light" | "dark" }) {
       const full = typeof window !== "undefined" ? window.location.href : url;
       await navigator.clipboard.writeText(full);
       setToast("Link copied to clipboard");
-      setTimeout(() => setMessage(null), 2200);
+      setTimeout(() => setToast(null), 2200);
     } catch {
       setToast("Unable to copy link");
-      setTimeout(() => setMessage(null), 2200);
+      setTimeout(() => setToast(null), 2200);
     }
   }
 
@@ -764,14 +764,14 @@ function ShareApp({ theme }: { theme: "light" | "dark" }) {
       if ((navigator as any).share) {
         await (navigator as any).share({ title: "CropTech", text: `Check out CropTech — helpful tools for farmers`, url });
         setToast("Shared successfully");
-        setTimeout(() => setMessage(null), 2200);
+        setTimeout(() => setToast(null), 2200);
         return;
       }
       setToast("Share not supported on this device");
-      setTimeout(() => setMessage(null), 2200);
+      setTimeout(() => setToast(null), 2200); 
     } catch {
       setToast("Share failed");
-      setTimeout(() => setMessage(null), 2200);
+      setTimeout(() => setToast(null), 2200);
     }
   }
 
