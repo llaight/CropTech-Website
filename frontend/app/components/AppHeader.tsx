@@ -35,8 +35,8 @@ export default function AppHeader() {
         <div className="flex items-center h-16">
           {/* Left: Brand */}
           <div className="flex items-center gap-3 mr-auto">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Image src="/ctlogo.png" alt="CropTech" width={24} height={24} className="rounded-lg" />
+            <div className="w-10 h-10 flex items-center justify-center">
+              <Image src="/ctlogo.png" alt="CropTech" width={56} height={56} className="block" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-slate-900">CropTech</h1>
