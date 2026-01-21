@@ -1572,7 +1572,7 @@ export default function InventoryPage() {
         <div className="max-w-7xl mx-auto">
           <div className="mb-8 flex justify-between items-center">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">Rice Varieties Inventory</h1>
+              <h1 className="text-3xl font-bold text-white">Rice Varieties Inventory</h1>
               <p className="text-white mt-2">
                 {user?.name ? `Welcome, ${user.name}! Manage your rice varieties here.` : "Manage your rice varieties here."}
               </p>
@@ -1581,7 +1581,7 @@ export default function InventoryPage() {
               <div className="flex gap-2">
                 <button
                   onClick={exportData}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition flex items-center gap-2 text-sm"
+                  className="px-4 py-2 bg-blue-700 text-white rounded-lg font-medium hover:bg-blue-800 transition flex items-center gap-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                   title="Export to PDF"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1592,7 +1592,7 @@ export default function InventoryPage() {
               </div>
               <button
                 onClick={() => setIsAddModalOpen(true)}
-                className="px-6 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition flex items-center gap-2"
+                className="px-6 py-3 bg-green-700 text-white font-medium rounded-xl shadow-md hover:bg-green-800 transition-all transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 flex items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1603,7 +1603,7 @@ export default function InventoryPage() {
           </div>
 
           {/* Data Management Info Bar */}
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <div className="mb-6 p-4 bg-slate-100 border border-green-300/50 rounded-xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
