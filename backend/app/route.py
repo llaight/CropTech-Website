@@ -437,12 +437,22 @@ def list_inventory():
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
             user_id = payload.get("user_id")
-        except Exception:
+        except Exception as e:
+            print(f"Token decode error: {e}")
             user_id = None
     
     # If no token, check for user_id in query params
     if not user_id:
         user_id = request.args.get("user_id")
+    
+    if not user_id:
+        return jsonify({"message": "user_id is required (from token or query param)"}), 400
+    
+    # Ensure user_id is an integer
+    try:
+        user_id = int(user_id)
+    except (ValueError, TypeError):
+        return jsonify({"message": "user_id must be an integer"}), 400
     
     conn = get_connection()
     if conn is None:
@@ -450,33 +460,19 @@ def list_inventory():
 
     cursor = conn.cursor()
     try:
-        if user_id:
-            cursor.execute("""
-                SELECT 
-                    item_id, name, price_per_unit, 
-                    sacks_of_grains_25kg, sacks_of_grains_50kg,
-                    sacks_of_rice_25kg, sacks_of_rice_50kg,
-                    grains_condition, grains_condition_other,
-                    rice_condition, rice_condition_other,
-                    grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
-                    remarks, type, user_id, created_at 
-                FROM inventory 
-                WHERE user_id=%s 
-                ORDER BY created_at DESC;
-            """, (user_id,))
-        else:
-            cursor.execute("""
-                SELECT 
-                    item_id, name, price_per_unit, 
-                    sacks_of_grains_25kg, sacks_of_grains_50kg,
-                    sacks_of_rice_25kg, sacks_of_rice_50kg,
-                    grains_condition, grains_condition_other,
-                    rice_condition, rice_condition_other,
-                    grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
-                    remarks, type, user_id, created_at 
-                FROM inventory 
-                ORDER BY created_at DESC;
-            """)
+        cursor.execute("""
+            SELECT 
+                item_id, name, price_per_unit, 
+                sacks_of_grains_25kg, sacks_of_grains_50kg,
+                sacks_of_rice_25kg, sacks_of_rice_50kg,
+                grains_condition, grains_condition_other,
+                rice_condition, rice_condition_other,
+                grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
+                remarks, type, user_id, created_at 
+            FROM inventory 
+            WHERE user_id=%s 
+            ORDER BY created_at DESC;
+        """, (user_id,))
         
         rows = cursor.fetchall()
         inventory_items = []
@@ -598,6 +594,175 @@ def list_inventory_crops():
     cursor.close()
     conn.close()
     return jsonify({"crops": crops}), 200
+
+
+@bp.route("/inventory/total-grain", methods=["GET"])
+def get_total_grain():
+    """Return total grain available for planting (grains_to_plant_sacks converted to kg)."""
+    # Determine user_id from token or query param
+    auth = request.headers.get("Authorization")
+    user_id = None
+
+    if auth and auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            user_id = payload.get("user_id")
+        except Exception as e:
+            print(f"Token decode error in get_total_grain: {e}")
+            user_id = None
+
+    if not user_id:
+        user_id = request.args.get("user_id")
+
+    if not user_id:
+        return jsonify({"message": "user_id is required"}), 400
+
+    # Ensure user_id is an integer
+    try:
+        user_id = int(user_id)
+    except (ValueError, TypeError):
+        return jsonify({"message": "user_id must be an integer"}), 400
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(grains_to_plant_sacks_25kg), 0) * 25 + 
+                COALESCE(SUM(grains_to_plant_sacks_50kg), 0) * 50 as total_grain_kg
+            FROM inventory
+            WHERE user_id = %s;
+        """, (user_id,))
+        row = cursor.fetchone()
+        total_grain_kg = row[0] if row and row[0] else 0
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error calculating total grain", "error": str(e)}), 500
+
+    cursor.close()
+    conn.close()
+    return jsonify({"total_grain_kg": float(total_grain_kg)}), 200
+
+
+@bp.route("/inventory/deduct-grain", methods=["POST"])
+def deduct_grain():
+    """Deduct grain from inventory when a crop is planted."""
+    # Get user from token
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        return jsonify({"message": "Missing or invalid Authorization header"}), 401
+
+    token = auth.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception as e:
+        return jsonify({"message": "Invalid token", "error": str(e)}), 401
+
+    data = request.get_json() or {}
+    crop_name = data.get("crop_name", "").strip()
+    quantity_kg = data.get("quantity_kg", 0)
+
+    if not crop_name or quantity_kg <= 0:
+        return jsonify({"message": "crop_name and quantity_kg are required"}), 400
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        # Find inventory item with this crop name for the user
+        # Use grains_to_plant_sacks if > 0, otherwise use sacks_of_grains
+        cursor.execute("""
+            SELECT item_id, 
+                   CASE WHEN grains_to_plant_sacks_25kg > 0 THEN grains_to_plant_sacks_25kg ELSE COALESCE(sacks_of_grains_25kg, 0) END as sacks_25kg,
+                   CASE WHEN grains_to_plant_sacks_50kg > 0 THEN grains_to_plant_sacks_50kg ELSE COALESCE(sacks_of_grains_50kg, 0) END as sacks_50kg
+            FROM inventory 
+            WHERE user_id = %s AND name = %s 
+            LIMIT 1;
+        """, (user_id, crop_name))
+        row = cursor.fetchone()
+
+        if not row:
+            return jsonify({"message": f"No inventory item found for crop: {crop_name}"}), 404
+
+        item_id, sacks_25kg, sacks_50kg = row
+        sacks_25kg = sacks_25kg or 0
+        sacks_50kg = sacks_50kg or 0
+
+        # Calculate current total grain in kg
+        current_total_kg = (sacks_25kg * 25) + (sacks_50kg * 50)
+
+        if quantity_kg > current_total_kg:
+            return jsonify({
+                "message": f"Insufficient grain. Required: {quantity_kg} kg, Available: {current_total_kg} kg"
+            }), 400
+
+        # Deduct from 50kg sacks first, then 25kg sacks
+        remaining_to_deduct = quantity_kg
+        new_sacks_50kg = sacks_50kg
+        new_sacks_25kg = sacks_25kg
+
+        # Deduct from 50kg sacks
+        sacks_to_remove_50kg = int(remaining_to_deduct // 50)
+        if sacks_to_remove_50kg > 0:
+            if sacks_to_remove_50kg <= new_sacks_50kg:
+                new_sacks_50kg -= sacks_to_remove_50kg
+                remaining_to_deduct -= sacks_to_remove_50kg * 50
+            else:
+                remaining_to_deduct -= new_sacks_50kg * 50
+                new_sacks_50kg = 0
+
+        # Deduct from 25kg sacks
+        if remaining_to_deduct > 0:
+            sacks_to_remove_25kg = int(remaining_to_deduct // 25)
+            if sacks_to_remove_25kg > 0:
+                if sacks_to_remove_25kg <= new_sacks_25kg:
+                    new_sacks_25kg -= sacks_to_remove_25kg
+                    remaining_to_deduct -= sacks_to_remove_25kg * 25
+                else:
+                    remaining_to_deduct -= new_sacks_25kg * 25
+                    new_sacks_25kg = 0
+
+        # Update both grains_to_plant_sacks and sacks_of_grains to keep them in sync
+        cursor.execute("""
+            UPDATE inventory 
+            SET grains_to_plant_sacks_25kg = %s, 
+                grains_to_plant_sacks_50kg = %s,
+                sacks_of_grains_25kg = %s,
+                sacks_of_grains_50kg = %s
+            WHERE item_id = %s;
+        """, (new_sacks_25kg, new_sacks_50kg, new_sacks_25kg, new_sacks_50kg, item_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print(f"✅ Deducted {quantity_kg} kg from {crop_name}: {new_sacks_50kg} x 50kg + {new_sacks_25kg} x 25kg remaining")
+        
+        return jsonify({
+            "message": "Grain deducted successfully",
+            "deducted_kg": quantity_kg,
+            "remaining_25kg_sacks": new_sacks_25kg,
+            "remaining_50kg_sacks": new_sacks_50kg,
+        }), 200
+
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        print(f"❌ Error deducting grain: {e}")
+        return jsonify({"message": "Error deducting grain", "error": str(e)}), 500
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error deducting grain", "error": str(e)}), 500
 
 
 @bp.route("/inventory/<int:item_id>", methods=["PUT"])
@@ -1015,6 +1180,7 @@ def create_crop():
     actual_harvest_date = data.get("actual_harvest_date")  # expect YYYY-MM-DD or None
     expected_yield_kg = data.get("expected_yield_kg")
     actual_yield_kg = data.get("actual_yield_kg")
+    planted_grain_kg = data.get("planted_grain_kg")
     health_status = data.get("health_status")
     notes = data.get("notes")
     field_id = data.get("field_id")
@@ -1051,10 +1217,10 @@ def create_crop():
     try:
         cursor.execute(
             """
-            INSERT INTO crops (name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, notes, user_id, field_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING crop_id;
+            INSERT INTO crops (name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, planted_grain_kg, notes, user_id, field_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING crop_id;
             """,
-            (name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, notes, user_id, field_id),
+            (name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, planted_grain_kg, notes, user_id, field_id),
         )
         row = cursor.fetchone()
         conn.commit()
@@ -1076,6 +1242,7 @@ def create_crop():
         "actual_harvest_date": actual_harvest_date,
         "expected_yield_kg": expected_yield_kg,
         "actual_yield_kg": actual_yield_kg,
+        "planted_grain_kg": planted_grain_kg,
         "notes": notes,
         "user_id": user_id,
         "field_id": field_id
@@ -1093,7 +1260,7 @@ def list_crops():
 
     cursor = conn.cursor()
     try:
-        select_stmt = "SELECT crop_id, name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, notes, user_id, field_id FROM crops"
+        select_stmt = "SELECT crop_id, name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, planted_grain_kg, notes, user_id, field_id FROM crops"
         if q_user and q_field:
             cursor.execute(select_stmt + " WHERE user_id=%s AND field_id=%s;", (q_user, q_field))
         elif q_user:
@@ -1115,6 +1282,7 @@ def list_crops():
                 actual_harvest_date,
                 expected_yield_kg,
                 actual_yield_kg,
+                planted_grain_kg,
                 notes,
                 uid,
                 fid,
@@ -1136,6 +1304,7 @@ def list_crops():
                 "actual_harvest_date": actual_harvest_date.isoformat() if actual_harvest_date else None,
                 "expected_yield_kg": expected_yield_kg,
                 "actual_yield_kg": actual_yield_kg,
+                "planted_grain_kg": planted_grain_kg,
                 "notes": notes,
                 "user_id": uid,
                 "field_id": fid,
@@ -1159,6 +1328,7 @@ def update_crop(crop_id):
     actual_harvest_date = data.get("actual_harvest_date")  # expect YYYY-MM-DD or None
     expected_yield_kg = data.get("expected_yield_kg")
     actual_yield_kg = data.get("actual_yield_kg")
+    planted_grain_kg = data.get("planted_grain_kg")
     name = data.get("name")
     health_status = data.get("health_status")
     notes = data.get("notes")
@@ -1187,6 +1357,9 @@ def update_crop(crop_id):
         if actual_yield_kg is not None:
             updates.append("actual_yield_kg = %s")
             values.append(actual_yield_kg)
+        if planted_grain_kg is not None:
+            updates.append("planted_grain_kg = %s")
+            values.append(planted_grain_kg)
         if name is not None:
             updates.append("name = %s")
             values.append(name)
@@ -1215,7 +1388,7 @@ def update_crop(crop_id):
 
         update_stmt = (
             f"UPDATE crops SET {', '.join(updates)} WHERE crop_id = %s "
-            "RETURNING crop_id, name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, notes, user_id, field_id;"
+            "RETURNING crop_id, name, health_status, planting_date, expected_harvest_date, actual_harvest_date, expected_yield_kg, actual_yield_kg, planted_grain_kg, notes, user_id, field_id;"
         )
         
         cursor.execute(update_stmt, values)
@@ -1236,6 +1409,7 @@ def update_crop(crop_id):
             actual_harvest_date,
             expected_yield_kg,
             actual_yield_kg,
+            planted_grain_kg,
             notes,
             uid,
             fid,
@@ -1251,6 +1425,7 @@ def update_crop(crop_id):
             "actual_harvest_date": actual_harvest_date.isoformat() if actual_harvest_date else None,
             "expected_yield_kg": expected_yield_kg,
             "actual_yield_kg": actual_yield_kg,
+            "planted_grain_kg": planted_grain_kg,
             "notes": notes,
             "user_id": uid,
             "field_id": fid,
@@ -1481,6 +1656,92 @@ def get_harvest_history():
         cursor.close()
         conn.close()
         return jsonify({"message": "Error fetching harvest history", "error": str(e)}), 500
+
+
+# -------------------------
+# Get crop harvest history for a field
+# -------------------------
+@bp.route("/fields/<int:field_id>/harvest-history", methods=["GET"])
+def get_field_harvest_history(field_id: int):
+    """Fetch crop harvest history rows filtered by field_id.
+
+    Returns items using the keys expected by the frontend history page.
+    """
+    # Optional: scope by authenticated user to avoid leaking other users' data
+    auth = request.headers.get("Authorization")
+    user_id = None
+    if auth and auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            user_id = payload.get("user_id")
+        except Exception:
+            user_id = None
+
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+
+    cursor = conn.cursor()
+    try:
+        params = [field_id]
+        where_clause = "field_id = %s"
+        if user_id:
+            where_clause += " AND (user_id = %s OR user_id IS NULL)"
+            params.append(user_id)
+
+        cursor.execute(
+            f"""
+            SELECT harvest_id, crop_id, field_id, user_id, crop_name, planting_date,
+                   expected_harvest_date, actual_harvest_date, expected_yield_kg,
+                   actual_yield_kg, notes, created_at
+            FROM crop_harvest_history
+            WHERE {where_clause}
+            ORDER BY created_at DESC;
+            """,
+            tuple(params),
+        )
+
+        rows = cursor.fetchall()
+        history = []
+        for row in rows:
+            (
+                hid,
+                cid,
+                fid,
+                uid,
+                crop_name,
+                planting_date,
+                expected_harvest_date,
+                actual_harvest_date,
+                expected_yield,
+                actual_yield,
+                notes,
+                created_at,
+            ) = row
+
+            history.append({
+                "id": hid,
+                "crop_id": cid,
+                "field_id": fid,
+                "user_id": uid,
+                "crop_name": crop_name,
+                "planting_date": planting_date.isoformat() if planting_date else None,
+                "harvest_date": actual_harvest_date.isoformat() if actual_harvest_date else None,
+                "expected_harvest_date": expected_harvest_date.isoformat() if expected_harvest_date else None,
+                "expected_yield_kg": expected_yield if expected_yield is not None else 0,
+                "actual_yield_kg": actual_yield if actual_yield is not None else 0,
+                "notes": notes,
+                "created_at": created_at.isoformat() if created_at else None,
+            })
+
+        cursor.close()
+        conn.close()
+        return jsonify({"history": history}), 200
+    except Exception as e:
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching field harvest history", "error": str(e)}), 500
 
 
 # -------------------------

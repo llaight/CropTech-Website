@@ -77,15 +77,20 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
     try {
       console.log("Loading calendar data...");
       
-      // Load dates
+      // Load dates - prioritize initial props (new crop data) over localStorage
       const rawDates = localStorage.getItem(storageKey);
-      if (rawDates) {
-        const parsed = JSON.parse(rawDates);
-        setPlantingDate(parsed.planting ?? initialPlantingDate ?? "");
-        setHarvestDate(parsed.harvest ?? initialHarvestDate ?? "");
-      } else {
+      if (initialPlantingDate || initialHarvestDate) {
+        // New crop data provided - use that instead of localStorage
         setPlantingDate(initialPlantingDate ?? "");
         setHarvestDate(initialHarvestDate ?? "");
+      } else if (rawDates) {
+        // No new crop data - fall back to cached localStorage
+        const parsed = JSON.parse(rawDates);
+        setPlantingDate(parsed.planting ?? "");
+        setHarvestDate(parsed.harvest ?? "");
+      } else {
+        setPlantingDate("");
+        setHarvestDate("");
       }
 
       // Load events - combine both regular events and typhoon data

@@ -134,10 +134,14 @@ export default function InventoryPage() {
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [isSavingDelivery, setIsSavingDelivery] = useState(false);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
-  const [deliveryTab, setDeliveryTab] = useState<'upcoming' | 'completed' | 'returned_cancelled'>('upcoming');
+  const [deliveryTab, setDeliveryTab] = useState<'upcoming' | 'pending' | 'completed' | 'cancelled_returned'>('upcoming');
   const [activeTab, setActiveTab] = useState<'inventory' | 'deliveries'>('inventory');
   const [deliveriesLoaded, setDeliveriesLoaded] = useState(false);
   const [processedDeliveries, setProcessedDeliveries] = useState<Set<number>>(new Set());
+  const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
+  const [rescheduleDelivery, setRescheduleDelivery] = useState<DeliveryRecord | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState<string>('');
+  const [rescheduleTime, setRescheduleTime] = useState<string>('');
 
   // Helper function to get current local date in YYYY-MM-DD format
   const getLocalDate = () => {
@@ -154,6 +158,24 @@ export default function InventoryPage() {
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     return `${hours}:${minutes}`;
+  };
+
+  // Helper function to check if a delivery is pending (past due date but not delivered)
+  const isPending = (delivery: DeliveryRecord): boolean => {
+    if (delivery.status !== 'to be delivered') return false;
+    
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const today = `${year}-${month}-${day}`;
+    
+    const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    
+    const deliveryDate = delivery.delivery_date.slice(0, 10);
+    const deliveryTime = (delivery.delivery_time || '09:00:00').slice(0, 5);
+    
+    return deliveryDate < today || (deliveryDate === today && deliveryTime <= currentTime);
   };
 
   const [newDelivery, setNewDelivery] = useState<{
@@ -582,9 +604,6 @@ export default function InventoryPage() {
         
         // Process deliveries for inventory updates
         processDeliveriesForInventory();
-        
-        console.log('Running auto-complete check on', data.deliveries.length, 'deliveries');
-        await autoCompleteDueDeliveries(updatedDeliveries);
       }
     } catch (e) {
       console.error('Error loading deliveries from backend:', e);
@@ -698,12 +717,13 @@ export default function InventoryPage() {
     }
   }, [inventoryData, isLoading]);
 
-  // Periodically check and auto-complete due deliveries
+  // Note: Auto-completion of deliveries is disabled - users must manually confirm delivery status
+  // Periodically check delivery status updates (but won't auto-complete)
   useEffect(() => {
     if (activeTab !== 'deliveries' || deliveries.length === 0) return;
 
     const interval = setInterval(() => {
-      autoCompleteDueDeliveries(deliveries);
+      loadDeliveriesFromBackend();
     }, 60000);
 
     return () => clearInterval(interval);
@@ -771,6 +791,71 @@ export default function InventoryPage() {
       }, 500);
     } else {
       console.error(`Failed to update delivery ${deliveryId} status`);
+    }
+  };
+
+  // Handle opening reschedule modal
+  const handleOpenReschedule = (delivery: DeliveryRecord) => {
+    setRescheduleDelivery(delivery);
+    setRescheduleDate(delivery.delivery_date);
+    setRescheduleTime(delivery.delivery_time || '09:00');
+    setIsRescheduleModalOpen(true);
+  };
+
+  // Handle closing reschedule modal
+  const handleCloseReschedule = () => {
+    setIsRescheduleModalOpen(false);
+    setRescheduleDelivery(null);
+    setRescheduleDate('');
+    setRescheduleTime('');
+  };
+
+  // Handle reschedule submission
+  const handleRescheduleSubmit = async () => {
+    if (!rescheduleDelivery || !rescheduleDate || !rescheduleTime) {
+      alert('Please provide both date and time.');
+      return;
+    }
+
+    try {
+      const token = user?.token || localStorage.getItem('token');
+      if (!token) {
+        alert('You must be logged in to reschedule deliveries.');
+        return;
+      }
+
+      const res = await fetch(`http://localhost:5001/api/deliveries/${rescheduleDelivery.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ 
+          delivery_date: rescheduleDate,
+          delivery_time: rescheduleTime,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        alert(`Error rescheduling delivery: ${error.message}`);
+        return;
+      }
+
+      // Update local state
+      const updatedDeliveries = deliveries.map(d => 
+        d.id === rescheduleDelivery.id 
+          ? { ...d, delivery_date: rescheduleDate, delivery_time: rescheduleTime }
+          : d
+      );
+      setDeliveries(updatedDeliveries);
+      localStorage.setItem(STORAGE_KEYS.DELIVERIES, JSON.stringify(updatedDeliveries));
+
+      handleCloseReschedule();
+      alert('Delivery rescheduled successfully!');
+    } catch (error) {
+      console.error('Error rescheduling delivery:', error);
+      alert('Error rescheduling delivery. Please try again.');
     }
   };
 
@@ -1090,6 +1175,13 @@ export default function InventoryPage() {
       if (success) {
         // If delivery is marked as delivered, deduct inventory immediately
         if (newDelivery.status === 'delivered') {
+          const totalRevenue = newDelivery.items.reduce((total, item) => {
+            const inventoryItem = inventoryData.find(inv => inv.name === item.variety);
+            const pricePerKg = inventoryItem?.price || 0;
+            const totalKg = item.sacks * item.sack_size_kg;
+            return total + (pricePerKg * totalKg);
+          }, 0);
+
           const tempDelivery: DeliveryRecord = {
             id: Date.now(), // Temporary ID
             delivery_date: newDelivery.delivery_date,
@@ -1100,6 +1192,7 @@ export default function InventoryPage() {
             status: newDelivery.status,
             items: newDelivery.items,
             total_quantity_kg: newDelivery.items.reduce((sum, it) => sum + it.sacks * it.sack_size_kg, 0),
+            total_revenue_php: totalRevenue,
             notes: newDelivery.notes,
             created_at: new Date().toISOString(),
           };
@@ -1913,16 +2006,19 @@ export default function InventoryPage() {
                   <div className="flex-1 overflow-y-auto px-6 pb-6">
                     {(() => {
                       const upcomingList = deliveries
-                        .filter(d => d.status === 'to be delivered')
+                        .filter(d => d.status === 'to be delivered' && !isPending(d))
+                        .sort((a, b) => a.delivery_date.localeCompare(b.delivery_date));
+                      const pendingList = deliveries
+                        .filter(d => isPending(d))
                         .sort((a, b) => a.delivery_date.localeCompare(b.delivery_date));
                       const completedList = deliveries
                         .filter(d => d.status === 'delivered')
                         .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
-                      const returnedCancelledList = deliveries
+                      const cancelledReturnedList = deliveries
                         .filter(d => d.status === 'returned' || d.status === 'cancelled')
                         .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
 
-                      const tabBtn = (key: 'upcoming' | 'completed' | 'returned_cancelled', label: string, count: number) => (
+                      const tabBtn = (key: 'upcoming' | 'pending' | 'completed' | 'cancelled_returned', label: string, count: number) => (
                         <button
                           onClick={() => setDeliveryTab(key)}
                           className={`${deliveryTab === key ? 'bg-white text-slate-900 shadow' : 'text-slate-600 hover:text-slate-800'} px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5`}
@@ -1937,8 +2033,9 @@ export default function InventoryPage() {
                           <div className="flex items-center justify-between">
                             <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1">
                               {tabBtn('upcoming', 'Upcoming', upcomingList.length)}
+                              {tabBtn('pending', 'Pending', pendingList.length)}
                               {tabBtn('completed', 'Completed', completedList.length)}
-                              {tabBtn('returned_cancelled', 'Returned/Cancelled', returnedCancelledList.length)}
+                              {tabBtn('cancelled_returned', 'Cancelled/Returned', cancelledReturnedList.length)}
                             </div>
                           </div>
 
@@ -1995,10 +2092,81 @@ export default function InventoryPage() {
                                         Complete
                                       </button>
                                       <button
+                                        onClick={() => handleOpenReschedule(delivery)}
+                                        className="flex-1 px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
+                                      >
+                                        Reschedule
+                                      </button>
+                                      <button
                                         onClick={() => handleUpdateDeliveryStatus(delivery.id, 'cancelled')}
                                         className="flex-1 px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition font-medium"
                                       >
                                         Cancel Order
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+
+                          {/* Pending */}
+                          {deliveryTab === 'pending' && (
+                            <div className="space-y-4">
+                              {pendingList.length === 0 ? (
+                                <p className="text-sm text-slate-500">No pending deliveries.</p>
+                              ) : (
+                                pendingList.map(delivery => (
+                                  <div key={delivery.id} className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <p className="font-semibold text-slate-900">{delivery.recipient}</p>
+                                      <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">#{delivery.id}</span>
+                                    </div>
+                                    <p className="text-sm text-slate-600">{formatLongDate(delivery.delivery_date)}</p>
+                                    <p className="text-xs text-red-600 font-semibold mt-1">Overdue - Time: {delivery.delivery_time || '09:00'}</p>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <p className="text-sm text-slate-600">{delivery.destination}</p>
+                                      <span className={`text-xs px-2 py-1 rounded font-semibold ${delivery.method === 'delivery' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {delivery.method === 'delivery' ? 'Delivery' : 'Pick-up'}
+                                      </span>
+                                    </div>
+                                    <div className="mt-3 text-xs font-semibold text-slate-600 mb-2">Order Details:</div>
+                                    <div className="space-y-1 text-sm mb-3">
+                                      {delivery.items.map((it, i) => {
+                                        const inventoryItem = inventoryData.find(inv => inv.name === it.variety);
+                                        const pricePerKg = inventoryItem?.price || 0;
+                                        const totalKg = it.sacks * it.sack_size_kg;
+                                        const subtotal = pricePerKg * totalKg;
+                                        return (
+                                          <div key={i} className="flex justify-between text-slate-600">
+                                            <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
+                                            <span className="font-semibold text-yellow-600">₱{formatPrice(subtotal)}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                    {delivery.notes && (
+                                      <div className="mt-2 p-3 bg-white/70 rounded">
+                                        <div className="text-xs font-semibold text-slate-500 mb-1">Notes</div>
+                                        <p className="text-sm text-slate-700">{delivery.notes}</p>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between items-center pt-2 border-t border-yellow-100 mb-3">
+                                      <span className="text-xs text-slate-600">Total Price</span>
+                                      <span className="font-bold text-yellow-700">₱{formatPrice(delivery.total_revenue_php)}</span>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => handleUpdateDeliveryStatus(delivery.id, 'delivered')}
+                                        className="flex-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition font-medium"
+                                      >
+                                        Completed on Time
+                                      </button>
+                                      <button
+                                        onClick={() => handleOpenReschedule(delivery)}
+                                        className="flex-1 px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
+                                      >
+                                        Reschedule
                                       </button>
                                     </div>
                                   </div>
@@ -2064,13 +2232,13 @@ export default function InventoryPage() {
                             </div>
                           )}
 
-                          {/* Returned/Cancelled */}
-                          {deliveryTab === 'returned_cancelled' && (
+                          {/* Cancelled/Returned */}
+                          {deliveryTab === 'cancelled_returned' && (
                             <div className="space-y-3">
-                              {returnedCancelledList.length === 0 ? (
+                              {cancelledReturnedList.length === 0 ? (
                                 <p className="text-sm text-slate-500">No returned or cancelled deliveries.</p>
                               ) : (
-                                returnedCancelledList.map(delivery => (
+                                cancelledReturnedList.map((delivery: DeliveryRecord) => (
                                   <div key={delivery.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
                                     <div className="flex justify-between items-start mb-2">
                                       <p className="font-semibold text-slate-900">{delivery.recipient}</p>
@@ -2123,6 +2291,71 @@ export default function InventoryPage() {
               </div>
             </div>
           )}
+
+      {/* Reschedule Modal */}
+      {isRescheduleModalOpen && rescheduleDelivery && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200">
+            <div className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-start">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Reschedule Delivery</h2>
+                <p className="text-slate-600 mt-1 text-sm">Order #{rescheduleDelivery.id} - {rescheduleDelivery.recipient}</p>
+              </div>
+              <button
+                onClick={handleCloseReschedule}
+                className="text-slate-500 hover:text-slate-700 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="px-6 py-6 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Delivery Date</label>
+                <input
+                  type="date"
+                  value={rescheduleDate}
+                  onChange={(e) => setRescheduleDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Delivery Time</label>
+                <input
+                  type="time"
+                  value={rescheduleTime}
+                  onChange={(e) => setRescheduleTime(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                <p className="text-sm text-slate-700">
+                  <span className="font-semibold">Current Schedule:</span><br />
+                  {formatLongDate(rescheduleDelivery.delivery_date)} at {rescheduleDelivery.delivery_time || '09:00'}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 px-6 py-4 flex gap-3 border-t border-slate-200 rounded-b-2xl">
+              <button
+                onClick={handleCloseReschedule}
+                className="flex-1 px-4 py-2 text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRescheduleSubmit}
+                className="flex-1 px-4 py-2 text-white bg-green-600 rounded-lg hover:bg-green-700 transition font-medium"
+              >
+                Reschedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {isModalOpen && selectedInventory && totals && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">

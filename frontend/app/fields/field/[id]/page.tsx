@@ -330,6 +330,7 @@ export default function FieldDetailPage() {
     actual_harvest_date: string | null;
     expected_yield_kg: number | null;
     actual_yield_kg: number | null;
+    planted_grain_kg: number | null;
     health_status: string | null;
     notes: string;
   } | null>(null);
@@ -344,11 +345,16 @@ export default function FieldDetailPage() {
     cropName: "",
     plantingDate: "",
     expectedYield: "",
+    grainSacks50kg: 0,
+    grainSacks25kg: 0,
   });
   const [isSavingCrop, setIsSavingCrop] = useState(false);
   const [plantCropError, setPlantCropError] = useState<string | null>(null);
   const [availableCrops, setAvailableCrops] = useState<string[]>([]);
   const [isLoadingCrops, setIsLoadingCrops] = useState(false);
+  const [availableGrainKg, setAvailableGrainKg] = useState<number | null>(null);
+  const [availableSacks50kg, setAvailableSacks50kg] = useState<number | null>(null);
+  const [availableSacks25kg, setAvailableSacks25kg] = useState<number | null>(null);
 
   const defaultFieldName = useMemo(() => {
     const fid = field?.id ?? fieldId;
@@ -436,9 +442,16 @@ export default function FieldDetailPage() {
     const cropName = (plantCropForm.cropName || "").trim();
     const plantingDate = plantCropForm.plantingDate.trim();
     const expectedYield = plantCropForm.expectedYield.trim();
+    const sacks50kg = plantCropForm.grainSacks50kg || 0;
+    const sacks25kg = plantCropForm.grainSacks25kg || 0;
 
     if (!cropName || !plantingDate || !expectedYield) {
       setPlantCropError("All fields are required");
+      return;
+    }
+
+    if (sacks50kg <= 0 && sacks25kg <= 0) {
+      setPlantCropError("Please select at least one grain sack (50kg or 25kg)");
       return;
     }
 
@@ -447,6 +460,9 @@ export default function FieldDetailPage() {
       setPlantCropError("Expected yield must be a positive number");
       return;
     }
+
+    // Calculate total planted grain in kg
+    const plantedGrainNum = (sacks50kg * 50) + (sacks25kg * 25);
 
     // Calculate expected harvest date as 120 days from planting date
     const plantingDateObj = new Date(plantingDate);
@@ -470,6 +486,7 @@ export default function FieldDetailPage() {
           planting_date: plantingDate,
           expected_harvest_date: expectedHarvestDate,
           expected_yield_kg: expectedYieldNum,
+          planted_grain_kg: plantedGrainNum,
         }),
       });
 
@@ -486,11 +503,45 @@ export default function FieldDetailPage() {
           actual_harvest_date: newCrop.actual_harvest_date || null,
           expected_yield_kg: newCrop.expected_yield_kg ?? expectedYieldNum,
           actual_yield_kg: newCrop.actual_yield_kg ?? null,
+          planted_grain_kg: newCrop.planted_grain_kg ?? plantedGrainNum,
           health_status: newCrop.health_status || "Good",
           notes: newCrop.notes || "Crop just planted",
         });
         setIsPlantCropModalOpen(false);
-        setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "" });
+        setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "", grainSacks50kg: 0, grainSacks25kg: 0 });
+        
+        // Deduct from inventory after successful crop creation
+        try {
+          console.log(`🌾 Deducting ${plantedGrainNum} kg of ${cropName} from inventory...`);
+          const deductRes = await fetch(`http://127.0.0.1:5001/api/inventory/deduct-grain`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              crop_name: cropName,
+              quantity_kg: plantedGrainNum,
+            }),
+          });
+          
+          if (deductRes.ok) {
+            const deductData = await deductRes.json().catch(() => ({}));
+            console.log(`✅ Grain deducted successfully:`, deductData);
+            
+            // Clear inventory cache so it refreshes from backend
+            try {
+              localStorage.removeItem('cachedInventoryData');
+              localStorage.removeItem('rice_inventory_data');
+              localStorage.removeItem('rice_inventory_last_sync');
+              console.log('✅ Cleared inventory cache');
+            } catch (e) {
+              console.error('Error clearing inventory cache:', e);
+            }
+          } else {
+            const errorText = await deductRes.text();
+            console.error(`Failed to deduct grain (${deductRes.status}):`, errorText);
+          }
+        } catch (err) {
+          console.error("Error deducting from inventory:", err);
+        }
       }
     } catch (err: any) {
       setPlantCropError(err?.message || "Network error while saving crop");
@@ -519,6 +570,132 @@ export default function FieldDetailPage() {
       console.error("Error fetching crops:", err);
     } finally {
       setIsLoadingCrops(false);
+    }
+  };
+
+  const fetchAvailableGrain = async () => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      if (!token) {
+        console.warn("No token found in localStorage");
+        setAvailableGrainKg(0);
+        return;
+      }
+
+      const headers: any = { "Content-Type": "application/json" };
+      headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`http://127.0.0.1:5001/api/inventory/total-grain`, { headers });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const totalGrain = data.total_grain_kg ?? 0;
+        setAvailableGrainKg(totalGrain);
+        console.log("Available grain:", totalGrain, "kg");
+      } else {
+        const errorData = await res.text();
+        console.warn("Failed to fetch available grain - status:", res.status, "response:", errorData);
+        setAvailableGrainKg(0);
+      }
+    } catch (err) {
+      console.error("Error fetching available grain:", err);
+      setAvailableGrainKg(0);
+    }
+  };
+
+  const fetchGrainSacksBreakdown = async (cropName: string) => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      if (!token) {
+        console.warn("No token found in localStorage");
+        setAvailableSacks50kg(0);
+        setAvailableSacks25kg(0);
+        setAvailableGrainKg(0);
+        return;
+      }
+
+      const headers: any = { "Content-Type": "application/json" };
+      headers["Authorization"] = `Bearer ${token}`;
+
+      // Fetch full inventory list to find the crop details
+      const res = await fetch(`http://127.0.0.1:5001/api/inventory`, { headers });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.log("Full inventory response:", data);
+        const inventoryItems = data.inventory || [];
+        console.log("Inventory items found:", inventoryItems.map((i: any) => `"${i.name}"`).join(", "));
+        
+        // Try exact match first, then case-insensitive
+        let cropInventory = inventoryItems.find((item: any) => item.name === cropName);
+        
+        if (!cropInventory) {
+          console.warn(`Exact match not found for "${cropName}", trying case-insensitive search...`);
+          cropInventory = inventoryItems.find((item: any) => item.name.toLowerCase() === cropName.toLowerCase());
+        }
+
+        if (cropInventory) {
+          console.log(`Found inventory for crop "${cropName}":`, {
+            name: cropInventory.name,
+            sacks_of_grains_50kg: cropInventory.sacks_of_grains_50kg,
+            sacks_of_grains_25kg: cropInventory.sacks_of_grains_25kg,
+            grains_to_plant_sacks_50kg: cropInventory.grains_to_plant_sacks_50kg,
+            grains_to_plant_sacks_25kg: cropInventory.grains_to_plant_sacks_25kg,
+          });
+          
+          // Use grains_to_plant sacks if available (newly populated), otherwise use total grain sacks
+          const sacks50kg = cropInventory.grains_to_plant_sacks_50kg > 0 
+            ? cropInventory.grains_to_plant_sacks_50kg 
+            : cropInventory.sacks_of_grains_50kg || 0;
+          const sacks25kg = cropInventory.grains_to_plant_sacks_25kg > 0
+            ? cropInventory.grains_to_plant_sacks_25kg
+            : cropInventory.sacks_of_grains_25kg || 0;
+          const totalKg = (sacks50kg * 50) + (sacks25kg * 25);
+
+          setAvailableSacks50kg(sacks50kg);
+          setAvailableSacks25kg(sacks25kg);
+          setAvailableGrainKg(totalKg);
+
+          console.log(`Grain breakdown for "${cropName}": ${sacks50kg} × 50kg + ${sacks25kg} × 25kg = ${totalKg}kg`);
+        } else {
+          console.error(`Crop "${cropName}" NOT found in inventory!`);
+          console.error(`Available inventory items: ${inventoryItems.map((i: any) => `"${i.name}"`).join(", ")}`);
+          setAvailableSacks50kg(0);
+          setAvailableSacks25kg(0);
+          setAvailableGrainKg(0);
+        }
+      } else {
+        const errorData = await res.text();
+        console.error(`Failed to fetch inventory - status: ${res.status}, response:`, errorData);
+        setAvailableSacks50kg(0);
+        setAvailableSacks25kg(0);
+        setAvailableGrainKg(0);
+      }
+    } catch (err) {
+      console.error("Error fetching grain sacks breakdown:", err);
+      setAvailableSacks50kg(0);
+      setAvailableSacks25kg(0);
+      setAvailableGrainKg(0);
+    }
+  };
+
+  const fetchAvailableGrain_old = async () => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`http://127.0.0.1:5001/api/inventory/total-grain`, { headers });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const totalGrain = data.total_grain_kg ?? 0;
+        setAvailableGrainKg(totalGrain);
+        console.log("Available grain:", totalGrain, "kg");
+      } else {
+        console.warn("Failed to fetch available grain");
+        setAvailableGrainKg(0);
+      }
+    } catch (err) {
+      console.error("Error fetching available grain:", err);
+      setAvailableGrainKg(0);
     }
   };
 
@@ -557,6 +734,7 @@ export default function FieldDetailPage() {
             actual_harvest_date: updatedCrop.actual_harvest_date || null,
             expected_yield_kg: updatedCrop.expected_yield_kg ?? null,
             actual_yield_kg: updatedCrop.actual_yield_kg ?? null,
+            planted_grain_kg: updatedCrop.planted_grain_kg ?? crop.planted_grain_kg,
             health_status: updatedCrop.health_status || crop.health_status,
             notes: updatedCrop.notes || crop.notes,
           });
@@ -745,6 +923,7 @@ export default function FieldDetailPage() {
               actual_harvest_date: fetchedCrop.actual_harvest_date || null,
               expected_yield_kg: fetchedCrop.expected_yield_kg ?? null,
               actual_yield_kg: fetchedCrop.actual_yield_kg ?? null,
+              planted_grain_kg: fetchedCrop.planted_grain_kg ?? null,
               health_status: fetchedCrop.health_status || "Unknown",
               notes:
                 fetchedCrop.notes ||
@@ -779,7 +958,19 @@ export default function FieldDetailPage() {
             {/* Header */}
             <div className="flex items-start justify-between gap-4 mb-6">
               <div className="flex-1">
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 flex items-start justify-between gap-4">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-lg p-6">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <Link
+                      href={`/fields/field/${fieldId}/history`}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="View field history"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 2m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </Link>
+                    <BackButton href="/fields" iconClassName="text-slate-900" />
+                  </div>
                   <div>
                     <div className="flex items-center gap-3 flex-wrap">
                       <h1 className="text-xl font-extrabold text-slate-900">{field.name || defaultFieldName}</h1>
@@ -802,10 +993,6 @@ export default function FieldDetailPage() {
                       Field ID: <span className="font-medium text-slate-700">{field.id}</span>
                     </p>
                     <p className="mt-1 text-sm text-slate-600 hidden sm:block">{cityName ?? field.location}</p>
-                  </div>
-
-                  <div className="self-start">
-                    <BackButton href="/fields" iconClassName="text-slate-900" />
                   </div>
                 </div>
               </div>
@@ -868,6 +1055,13 @@ export default function FieldDetailPage() {
                         onChange={(e) => {
                           setPlantCropForm({ ...plantCropForm, cropName: e.target.value });
                           setPlantCropError(null);
+                          if (e.target.value) {
+                            fetchGrainSacksBreakdown(e.target.value);
+                          } else {
+                            setAvailableSacks50kg(null);
+                            setAvailableSacks25kg(null);
+                            setAvailableGrainKg(null);
+                          }
                         }}
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
                       >
@@ -913,8 +1107,124 @@ export default function FieldDetailPage() {
                           setPlantCropError(null);
                         }}
                         placeholder="e.g., 500"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        disabled={!plantCropForm.cropName}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:bg-slate-100 disabled:cursor-not-allowed"
                       />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-slate-700">Select Grain Sacks</label>
+                        <span className={`text-xs ${!plantCropForm.cropName ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {!plantCropForm.cropName
+                            ? "Select a crop first"
+                            : availableSacks50kg !== null && availableSacks25kg !== null
+                            ? `Available: ${availableSacks50kg} × 50kg + ${availableSacks25kg} × 25kg`
+                            : "Loading..."
+                          }
+                        </span>
+                      </div>
+
+                      {/* 50kg Sacks Input */}
+                      <div className="flex items-center gap-3 p-3 border border-slate-300 rounded-lg bg-slate-50 disabled:opacity-50 disabled:bg-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (plantCropForm.grainSacks50kg > 0) {
+                              setPlantCropForm({ ...plantCropForm, grainSacks50kg: plantCropForm.grainSacks50kg - 1 });
+                            }
+                          }}
+                          disabled={!plantCropForm.cropName || plantCropForm.grainSacks50kg <= 0}
+                          className="px-2 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          −
+                        </button>
+                        <div className="flex-1">
+                          <label className="text-xs text-slate-600 block mb-1">Sacks of 50kg</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={plantCropForm.grainSacks50kg}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setPlantCropForm({ ...plantCropForm, grainSacks50kg: val });
+                              setPlantCropError(null);
+                            }}
+                            disabled={!plantCropForm.cropName}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:bg-slate-100"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const maxAvailable = availableSacks50kg || 0;
+                            if (plantCropForm.grainSacks50kg < maxAvailable) {
+                              setPlantCropForm({ ...plantCropForm, grainSacks50kg: plantCropForm.grainSacks50kg + 1 });
+                            }
+                          }}
+                          disabled={!plantCropForm.cropName || plantCropForm.grainSacks50kg >= (availableSacks50kg || 0)}
+                          className="px-2 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          +
+                        </button>
+                        <span className="text-sm font-medium text-slate-700 w-16 text-right">
+                          {(plantCropForm.grainSacks50kg * 50)} kg
+                        </span>
+                      </div>
+
+                      {/* 25kg Sacks Input */}
+                      <div className="flex items-center gap-3 p-3 border border-slate-300 rounded-lg bg-slate-50 disabled:opacity-50 disabled:bg-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (plantCropForm.grainSacks25kg > 0) {
+                              setPlantCropForm({ ...plantCropForm, grainSacks25kg: plantCropForm.grainSacks25kg - 1 });
+                            }
+                          }}
+                          disabled={!plantCropForm.cropName || plantCropForm.grainSacks25kg <= 0}
+                          className="px-2 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          −
+                        </button>
+                        <div className="flex-1">
+                          <label className="text-xs text-slate-600 block mb-1">Sacks of 25kg</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={plantCropForm.grainSacks25kg}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setPlantCropForm({ ...plantCropForm, grainSacks25kg: val });
+                              setPlantCropError(null);
+                            }}
+                            disabled={!plantCropForm.cropName}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:bg-slate-100"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const maxAvailable = availableSacks25kg || 0;
+                            if (plantCropForm.grainSacks25kg < maxAvailable) {
+                              setPlantCropForm({ ...plantCropForm, grainSacks25kg: plantCropForm.grainSacks25kg + 1 });
+                            }
+                          }}
+                          disabled={!plantCropForm.cropName || plantCropForm.grainSacks25kg >= (availableSacks25kg || 0)}
+                          className="px-2 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          +
+                        </button>
+                        <span className="text-sm font-medium text-slate-700 w-16 text-right">
+                          {(plantCropForm.grainSacks25kg * 25)} kg
+                        </span>
+                      </div>
+
+                      {/* Total Summary */}
+                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <p className="text-sm font-semibold text-green-900">
+                          Total: {plantCropForm.grainSacks50kg} × 50kg + {plantCropForm.grainSacks25kg} × 25kg = <span className="text-lg">{(plantCropForm.grainSacks50kg * 50) + (plantCropForm.grainSacks25kg * 25)} kg</span>
+                        </p>
+                      </div>
                     </div>
 
                     {plantCropError && <p className="text-xs text-red-600">{plantCropError}</p>}
@@ -923,7 +1233,7 @@ export default function FieldDetailPage() {
                     <button
                       onClick={() => {
                         setIsPlantCropModalOpen(false);
-                        setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "" });
+                        setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "", grainSacks50kg: 0, grainSacks25kg: 0 });
                         setPlantCropError(null);
                       }}
                       className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200"
@@ -1081,8 +1391,9 @@ export default function FieldDetailPage() {
                         onClick={() => {
                           setIsPlantCropModalOpen(true);
                           setPlantCropError(null);
-                          setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "" });
+                          setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "", grainSacks50kg: 0, grainSacks25kg: 0 });
                           fetchAvailableCrops();
+                          fetchAvailableGrain();
                         }}
                         className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg shadow hover:bg-green-700 transition-colors"
                       >

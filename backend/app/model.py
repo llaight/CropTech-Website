@@ -151,6 +151,20 @@ def create_tables():
                    )       
             """)
     
+    # Add missing columns for existing deployments
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_grains_25kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_grains_50kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_rice_25kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS sacks_of_rice_50kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_condition TEXT DEFAULT 'to store';")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_condition_other TEXT;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS rice_condition TEXT DEFAULT 'to store';")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS rice_condition_other TEXT;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_to_plant_sacks_25kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_to_plant_sacks_50kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS remarks TEXT;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS type TEXT;")
+    
     # crops table
     cursor.execute("""
              CREATE TABLE IF NOT EXISTS crops(
@@ -162,6 +176,7 @@ def create_tables():
                      actual_harvest_date DATE,
                      expected_yield_kg FLOAT,
                      actual_yield_kg FLOAT,
+                     planted_grain_kg FLOAT,
                      notes TEXT,
                      user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
                      field_id INTEGER REFERENCES fields(field_id) ON DELETE CASCADE
@@ -173,6 +188,7 @@ def create_tables():
     cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS actual_harvest_date DATE;")
     cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS expected_yield_kg FLOAT;")
     cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS actual_yield_kg FLOAT;")
+    cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS planted_grain_kg FLOAT;")
     cursor.execute("ALTER TABLE crops ADD COLUMN IF NOT EXISTS notes TEXT;")
 
     # crop harvest history table

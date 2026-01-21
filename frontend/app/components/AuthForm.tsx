@@ -15,7 +15,6 @@ export default function AuthForm({ mode }: Props) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -26,7 +25,7 @@ export default function AuthForm({ mode }: Props) {
     e.preventDefault();
     setMessage(null);
 
-    if (!email || !password || (mode === "signup" && (!name || !role))) {
+    if (!email || !password || (mode === "signup" && !name)) {
       setMessage("Please fill in all required fields.");
       return;
     }
@@ -36,7 +35,6 @@ export default function AuthForm({ mode }: Props) {
       const payload: any = { email, password };
       if (mode === "signup") {
         payload.name = name;
-        payload.role = role;
       }
 
       const res = await fetch(`${API_BASE}/${mode}`, {
@@ -81,7 +79,7 @@ export default function AuthForm({ mode }: Props) {
 
   return (
     <div className="w-full">
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-8">
         {/* Header */}
         <div className="text-center">
           <h2 className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-green-900'} mb-2 capitalize`}>
@@ -169,28 +167,6 @@ export default function AuthForm({ mode }: Props) {
               </button>
             </div>
           </div>
-
-          {mode === "signup" && (
-            <div className="space-y-2">
-              <label className={`block text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-green-800'}`}>
-                Role
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className={`w-full px-4 py-3 pr-12 bg-white/10 border border-white/20 rounded-xl ${theme === 'dark' ? 'text-white' : 'text-green-900'} placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-200`}
-                  placeholder="Enter your role (e.g., Farmer, Buyer, Admin)"
-                />
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                  <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Error Message */}
