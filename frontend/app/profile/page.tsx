@@ -34,14 +34,13 @@ export default function ProfilePage() {
 
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
-  const [formRole, setFormRole] = useState("");
+  const [formRole, setFormRole] = useState("farmer");
   const [formPassword, setFormPassword] = useState("");
   const [formNewPassword, setFormNewPassword] = useState("");
   const [formConfirmPassword, setFormConfirmPassword] = useState("");
 
   const [settings, setSettings] = useState<Settings>({ units: "metric" });
   const [securitySettings, setSecuritySettings] = useState({
-    twoFactorAuth: false,
     sessionTimeout: "30",
     saveLogin: false,
   });
@@ -55,7 +54,7 @@ export default function ProfilePage() {
         setUser(parsed);
         setFormName(parsed.name || "");
         setFormEmail(parsed.email || "");
-        setFormRole(parsed.role || "");
+        setFormRole(parsed.role || "farmer");
       }
     } catch {}
     
@@ -85,7 +84,6 @@ export default function ProfilePage() {
       if (response.ok) {
         const data = await response.json();
         setSecuritySettings({
-          twoFactorAuth: data.security?.twoFactorAuth || false,
           sessionTimeout: data.security?.sessionTimeout?.toString() || "30",
           saveLogin: data.security?.saveLogin || false,
         });
@@ -113,7 +111,6 @@ export default function ProfilePage() {
           Authorization: `Bearer ${token}` 
         },
         body: JSON.stringify({
-          twoFactorAuth: securitySettings.twoFactorAuth,
           sessionTimeout: parseInt(securitySettings.sessionTimeout),
           saveLogin: securitySettings.saveLogin,
         }),
@@ -199,7 +196,7 @@ export default function ProfilePage() {
       }
     }
 
-    const newUser: any = { ...(user || {}), name: formName.trim(), email: formEmail.trim(), role: formRole.trim() };
+    const newUser: any = { ...(user || {}), name: formName.trim(), email: formEmail.trim(), role: "farmer" };
     if (newPass) {
       const token = localStorage.getItem("token");
       if (token) {
@@ -289,7 +286,7 @@ export default function ProfilePage() {
               <Avatar name={user?.name} />
               <div>
                 <h2 className={`text-lg font-semibold ${headingText}`}>{user?.name || "Unnamed User"}</h2>
-                <p className={`text-sm ${mutedText}`}>{user?.role || "Role not set"}</p>
+                <p className={`text-sm ${mutedText}`}>{user?.role || "Farmer"}</p>
                 <p className={`text-xs ${mutedText} mt-1`}>{user?.email || ""}</p>
               </div>
             </div>
@@ -366,7 +363,13 @@ export default function ProfilePage() {
 
                   <label className="block">
                     <div className={`text-sm font-medium ${headingText}`}>Role</div>
-                    <input value={formRole} onChange={(e) => setFormRole(e.target.value)} placeholder="e.g., Farmer, Manager" className={inputClass} />
+                    <input 
+                      value={formRole} 
+                      readOnly 
+                      className={`${inputClass} bg-gray-100 dark:bg-slate-800 cursor-not-allowed`}
+                      title="Role is fixed to Farmer"
+                    />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1"></p>
                   </label>
 
                   <div className="md:col-span-2 mt-2">
@@ -396,12 +399,12 @@ export default function ProfilePage() {
                     <button className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" onClick={() => {
                       setFormName(user?.name || "");
                       setFormEmail(user?.email || "");
-                      setFormRole(user?.role || "");
+                      setFormRole("farmer"); // Reset to "farmer"
                       setFormPassword("");
                       setFormNewPassword("");
                       setFormConfirmPassword("");
                     }}>
-                      Reset
+                      Reset to Default
                     </button>
                   </div>
                 </div>
@@ -460,28 +463,6 @@ export default function ProfilePage() {
                 <p className={`text-sm ${mutedText} mb-4`}>Manage your account security and privacy.</p>
 
                 <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className={`text-sm font-medium ${headingText}`}>Two-Factor Authentication</div>
-                      <div className={`text-xs ${mutedText}`}>Add an extra layer of security to your account</div>
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        checked={securitySettings.twoFactorAuth}
-                        onChange={(e) => setSecuritySettings({ ...securitySettings, twoFactorAuth: e.target.checked })}
-                        className="sr-only"
-                        id="toggle-2fa"
-                      />
-                      <label
-                        htmlFor="toggle-2fa"
-                        className={`block w-12 h-6 rounded-full cursor-pointer transition-colors ${securitySettings.twoFactorAuth ? 'bg-green-600' : 'bg-slate-300 dark:bg-slate-700'}`}
-                      >
-                        <span className={`block w-5 h-5 mt-0.5 ml-0.5 rounded-full bg-white transition-transform ${securitySettings.twoFactorAuth ? 'transform translate-x-6' : ''}`}></span>
-                      </label>
-                    </div>
-                  </div>
-
                   <div>
                     <div className={`text-sm font-medium mb-2 ${headingText}`}>Session Timeout</div>
                     <select
@@ -541,7 +522,6 @@ export default function ProfilePage() {
                   </button>
                   <button className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" onClick={() => {
                     setSecuritySettings({
-                      twoFactorAuth: false,
                       sessionTimeout: "30",
                       saveLogin: false,
                     });
@@ -692,7 +672,6 @@ export default function ProfilePage() {
                             <li>Secure login and authentication</li>
                             <li>Email verification for new accounts</li>
                             <li>Protected user sessions</li>
-                            <li>Two-factor authentication option</li>
                             <li>Session timeout controls</li>
                           </ul>
                         </div>
