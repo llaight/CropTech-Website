@@ -152,7 +152,7 @@ export default function ProfilePage() {
         setTimeout(() => setMessage(null), 2500);
       } else {
         // If backend fails, try the direct public folder approach
-        window.open("/CropTech User Guide or Manual.pdf", "_blank");
+        window.open("/CropTech User Manual.pdf", "_blank");
         setMessage("Opening PDF in new tab");
         setTimeout(() => setMessage(null), 2500);
       }
@@ -366,10 +366,10 @@ export default function ProfilePage() {
                     <input 
                       value={formRole} 
                       readOnly 
-                      className={`${inputClass} bg-gray-100 dark:bg-slate-800 cursor-not-allowed`}
+                      className={`mt-1 w-full px-3 py-2 rounded-md border ${theme === "dark" ? "bg-slate-800 text-slate-100 border-slate-700" : "bg-gray-100 border-slate-300 text-slate-900"} cursor-not-allowed`}
                       title="Role is fixed to Farmer"
                     />
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1"></p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Role is fixed to Farmer</p>
                   </label>
 
                   <div className="md:col-span-2 mt-2">
@@ -399,7 +399,7 @@ export default function ProfilePage() {
                     <button className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" onClick={() => {
                       setFormName(user?.name || "");
                       setFormEmail(user?.email || "");
-                      setFormRole("farmer"); // Reset to "farmer"
+                      setFormRole("farmer");
                       setFormPassword("");
                       setFormNewPassword("");
                       setFormConfirmPassword("");
@@ -586,7 +586,7 @@ export default function ProfilePage() {
                       <section>
                         <h4 className={`text-md font-semibold mb-2 ${headingText}`}>2. Getting Started</h4>
                         <div className={`text-sm ${mutedText}`}>
-                          <p className="mb-2">To access the system:</p>
+                          <p className="mb-2"><strong>Accessing the System:</strong></p>
                           <ol className="list-decimal pl-5 space-y-1">
                             <li>Open a supported web browser (Chrome, Firefox, Edge)</li>
                             <li>Enter the CropTech website URL</li>
@@ -602,7 +602,7 @@ export default function ProfilePage() {
                           <ol className="list-decimal pl-5 space-y-1">
                             <li>From the Landing Page, click Create Account</li>
                             <li>Enter your full name, email address, and password</li>
-                            <li>Click Sign Up and verify your email</li>
+                            <li>Click Sign Up</li>
                           </ol>
                           
                           <p className="mt-3 mb-2"><strong>Logging In:</strong></p>
@@ -617,81 +617,102 @@ export default function ProfilePage() {
                       <section>
                         <h4 className={`text-md font-semibold mb-2 ${headingText}`}>4. System Navigation</h4>
                         <div className={`text-sm ${mutedText}`}>
-                          <p className="mb-2">After logging in, use the main navigation menu to access:</p>
+                          <p className="mb-2">The Dashboard is the central hub of the application with:</p>
                           <ul className="list-disc pl-5 space-y-1">
-                            <li><strong>Dashboard:</strong> Main overview with quick access to all modules</li>
-                            <li><strong>Land Tracker:</strong> Manage and monitor agricultural fields</li>
-                            <li><strong>Inventory:</strong> Track farm resources and supplies</li>
-                            <li><strong>Analytics:</strong> View visual insights and data</li>
-                            <li><strong>User Profile:</strong> Manage account settings</li>
+                            <li><strong>Key Metrics:</strong> Total Fields, Active Crops, Harvest Yield, and Revenue</li>
+                            <li><strong>Quick Actions:</strong> Manage Fields, Check Inventory, View Analytics</li>
+                            <li><strong>Recent Activity:</strong> Log of recent events</li>
+                          </ul>
+                          <p className="mt-2">Use the collapsible side navigation bar to access all modules.</p>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>5. Theme Customization</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p>Customize the appearance of the application:</p>
+                          <ol className="list-decimal pl-5 space-y-1 mt-1">
+                            <li>Locate the Theme Toggle switch in the top header bar</li>
+                            <li>Click the toggle to switch between White Mode (Light) and Dark Mode</li>
+                          </ol>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>6. Fields Page (Land Tracker)</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p className="mb-2">Manage your land with the Fields page:</p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li>View all registered fields on an interactive map with pins</li>
+                            <li>Use the search bar to find locations</li>
+                            <li>Add fields by clicking 4 points to define boundaries</li>
+                            <li>View field details: Field ID, Location, Weather, Crop Info, Calendar</li>
+                            <li>Track farm events: Watered, Fertilizer, Pesticide, or Typhoon</li>
+                            <li>Record harvests with actual dates and yields</li>
+                            <li>View harvest history for each field</li>
                           </ul>
                         </div>
                       </section>
 
                       <section>
-                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>5. Land Tracker Module</h4>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>7. Inventory Module</h4>
                         <div className={`text-sm ${mutedText}`}>
-                          <p className="mb-2">The Land Tracker allows you to:</p>
+                          <p className="mb-2"><strong>Rice Varieties:</strong></p>
                           <ul className="list-disc pl-5 space-y-1">
-                            <li>View all registered fields on an interactive map</li>
-                            <li>Select fields to see location and boundaries</li>
-                            <li>View field details including size and crop information</li>
+                            <li>View list of varieties with Name, Unit, Price, Condition</li>
+                            <li>Add new rice varieties with detailed inventory counts</li>
+                            <li>Manage varieties: edit, delete, or export PDF reports</li>
+                          </ul>
+                          
+                          <p className="mt-3 mb-2"><strong>Deliveries:</strong></p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li>Track deliveries by status: Upcoming, Pending, Completed, Cancelled</li>
+                            <li>Add new deliveries with date, time, recipient, destination</li>
+                            <li>Select delivery method (Delivery/Pick-up) and status</li>
+                            <li>Manage delivery items with variety, sack size, and count</li>
                           </ul>
                         </div>
                       </section>
 
                       <section>
-                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>6. Inventory Module</h4>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>8. Analytics Module</h4>
                         <div className={`text-sm ${mutedText}`}>
-                          <p className="mb-2">Manage farm resources with the Inventory module:</p>
-                          <ul className="list-disc pl-5 space-y-1">
-                            <li><strong>Add Items:</strong> Click Add Item, enter name, quantity, category</li>
-                            <li><strong>Update Items:</strong> Select item, click Edit, modify details</li>
-                            <li><strong>Delete Items:</strong> Select item, click Delete, confirm</li>
-                          </ul>
-                        </div>
-                      </section>
-
-                      <section>
-                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>7. Analytics Module</h4>
-                        <div className={`text-sm ${mutedText}`}>
-                          <p>View visual insights using real-time and historical agricultural data including:</p>
+                          <p>View comprehensive insights including:</p>
                           <ul className="list-disc pl-5 space-y-1 mt-1">
-                            <li>Crop performance metrics</li>
-                            <li>Weather-related data analysis</li>
-                            <li>Field productivity analytics</li>
+                            <li><strong>Performance:</strong> Total Revenue, Yield, Varieties, and Fields</li>
+                            <li><strong>Trends:</strong> Market Price, Historical Sales, Yield Trends charts</li>
+                            <li><strong>Crop Health:</strong> High-performing crops and Rice Variant Performance</li>
+                            <li><strong>Insights:</strong> Actionable recommendations for crop management</li>
+                            <li><strong>Environment:</strong> Field Distribution and 5-day Weather Forecast</li>
                           </ul>
                         </div>
                       </section>
 
                       <section>
-                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>8. Security Features</h4>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>9. User Profile & Settings</h4>
+                        <div className={`text-sm ${mutedText}`}>
+                          <p>Manage your account and preferences:</p>
+                          <ul className="list-disc pl-5 space-y-1">
+                            <li><strong>Account:</strong> Edit personal information and change password</li>
+                            <li><strong>App Settings:</strong> Select unit system (Metric or Imperial)</li>
+                            <li><strong>Security:</strong> Configure session timeout and save login preferences</li>
+                            <li><strong>User Guide:</strong> View documentation and download manual</li>
+                            <li><strong>Share App:</strong> Copy link or share to social media</li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section>
+                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>10. Security Features</h4>
                         <div className={`text-sm ${mutedText}`}>
                           <p>CropTech includes multiple security features:</p>
                           <ul className="list-disc pl-5 space-y-1">
                             <li>Secure login and authentication</li>
-                            <li>Email verification for new accounts</li>
                             <li>Protected user sessions</li>
+                            <li>Backend validation for all data operations</li>
                             <li>Session timeout controls</li>
                           </ul>
-                        </div>
-                      </section>
-
-                      <section>
-                        <h4 className={`text-md font-semibold mb-2 ${headingText}`}>9. System Requirements</h4>
-                        <div className={`text-sm ${mutedText}`}>
-                          <p className="mb-2"><strong>Hardware:</strong></p>
-                          <ul className="list-disc pl-5 space-y-1">
-                            <li>Desktop or laptop computer</li>
-                            <li>Minimum screen resolution: 1280 × 720</li>
-                            <li>Stable internet connection</li>
-                          </ul>
-                          
-                          <p className="mt-3 mb-2"><strong>Software:</strong></p>
-                          <ul className="list-disc pl-5 space-y-1">
-                            <li>Web browser (Chrome, Firefox, Edge recommended)</li>
-                            <li>Internet access for real-time features</li>
-                          </ul>
+                          <p className="mt-2"><strong>Security Tip:</strong> Always log out after using the system, especially when accessing from shared devices.</p>
                         </div>
                       </section>
                     </div>
