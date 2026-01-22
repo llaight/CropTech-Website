@@ -30,6 +30,9 @@ interface InventoryItem {
   rice_condition_other: string;
   rice_display_condition: string;
   
+  // Harvest to be alloted
+  harvest_to_be_alloted: number;
+  
   // Remarks
   remarks: string;
   
@@ -124,6 +127,9 @@ export default function InventoryPage() {
     grains_to_plant_sacks_25kg: 0,
     grains_to_plant_sacks_50kg: 0,
     
+    // Harvest to be alloted
+    harvest_to_be_alloted: 0,
+    
     // Remarks
     remarks: "",
   });
@@ -198,80 +204,90 @@ export default function InventoryPage() {
     notes: '',
   });
 
-  // Load data from localStorage on initial render
+  // Load data from backend on initial render
   useEffect(() => {
     const loadInitialData = async () => {
       try {
-        // Try to load user from localStorage
+        // Try to load user from localStorage first
         const raw = localStorage.getItem("user");
+        const tokenDirect = localStorage.getItem("token");
+        console.log("🔍 Checking localStorage for user...");
+        console.log("📦 User data found:", !!raw);
+        console.log("🔑 Direct token found:", !!tokenDirect);
+        
+        let userToken = tokenDirect; // Try direct token first
         if (raw) {
           const parsed = JSON.parse(raw);
+          console.log("👤 User object:", { id: parsed.id, name: parsed.name, hasToken: !!parsed.token });
           setUser(parsed);
-        }
-        
-        // Always try to load from localStorage first for inventory
-        const savedInventory = localStorage.getItem(STORAGE_KEYS.INVENTORY);
-        
-        let loadedInventory: InventoryItem[] = [];
-        
-        if (savedInventory) {
-          const parsedData = JSON.parse(savedInventory);
-          if (Array.isArray(parsedData) && parsedData.length > 0) {
-            loadedInventory = parsedData.map((item: any) => {
-              const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
-              const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
-              const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
-              const total_weight_rice_kg = (item.sacks_of_rice_25kg * 25) + (item.sacks_of_rice_50kg * 50);
-              
-              const grains_display_condition = item.grains_condition;
-              const rice_display_condition = item.rice_condition;
-              
-              return {
-                ...item,
-                total_sacks_of_grains,
-                total_sacks_of_rice,
-                total_weight_grains_kg,
-                total_weight_rice_kg,
-                grains_display_condition,
-                rice_display_condition,
-              };
-            });
-            console.log("Loaded inventory from localStorage:", loadedInventory.length, "items");
+          // Use token from user object if direct token not available
+          if (!userToken && parsed.token) {
+            userToken = parsed.token;
           }
         } else {
-          // Try cached data as fallback
-          const cachedData = getCachedData();
-          if (cachedData?.inventory && Array.isArray(cachedData.inventory) && cachedData.inventory.length > 0) {
-            loadedInventory = cachedData.inventory.map((item: any) => {
-              const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
-              const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
-              const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
-              const total_weight_rice_kg = (item.sacks_of_rice_25kg * 25) + (item.sacks_of_rice_50kg * 50);
-              
-              const grains_display_condition = item.grains_condition;
-              const rice_display_condition = item.rice_condition;
-              
-              return {
-                ...item,
-                total_sacks_of_grains,
-                total_sacks_of_rice,
-                total_weight_grains_kg,
-                total_weight_rice_kg,
-                grains_display_condition,
-                rice_display_condition,
-              };
-            });
-            console.log("Loaded inventory from cached data:", loadedInventory.length, "items");
-          } else {
-            // Start with empty inventory (REMOVED DEFAULT DATA)
-            loadedInventory = [];
-            console.log("Starting with empty inventory");
-          }
+          console.log("⚠️ No user data in localStorage");
         }
         
-        setInventoryData(loadedInventory);
+        // Fetch inventory from backend if token exists
+        if (userToken) {
+          console.log("🔑 Token found, fetching inventory from backend...");
+          console.log("🔍 Token preview:", userToken.substring(0, 20) + "...");
+          try {
+            const res = await fetch('http://localhost:5001/api/inventory', {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${userToken}`,
+              },
+            });
+
+            console.log("📡 Backend response status:", res.status);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.inventory && Array.isArray(data.inventory)) {
+                console.log('✅ Loaded inventory from backend:', data.inventory.length, 'items');
+                console.log('📊 Backend inventory with harvest:', data.inventory.map((i: any) => ({ name: i.name, harvest: i.harvest_to_be_alloted })));
+                
+                // Map backend data to frontend format with calculated totals
+                const backendInventory: InventoryItem[] = data.inventory.map((item: any) => {
+                  const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
+                  const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
+                  const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
+                  const total_weight_rice_kg = (item.sacks_of_rice_25kg * 25) + (item.sacks_of_rice_50kg * 50);
+                  
+                  return {
+                    ...item,
+                    total_sacks_of_grains,
+                    total_sacks_of_rice,
+                    total_weight_grains_kg,
+                    total_weight_rice_kg,
+                    grains_display_condition: item.grains_condition,
+                    rice_display_condition: item.rice_condition,
+                    harvest_to_be_alloted: item.harvest_to_be_alloted || 0,
+                  };
+                });
+                
+                setInventoryData(backendInventory);
+                saveToLocalStorage(backendInventory);
+              } else {
+                console.log("⚠️ No inventory data from backend");
+                setInventoryData([]);
+              }
+            } else {
+              console.error('❌ Backend inventory fetch failed with status:', res.status);
+              const errorText = await res.text();
+              console.error('Error details:', errorText);
+              setInventoryData([]);
+            }
+          } catch (e) {
+            console.error('❌ Error fetching inventory from backend:', e);
+            setInventoryData([]);
+          }
+        } else {
+          console.log("⚠️ No token found, cannot load inventory");
+          setInventoryData([]);
+        }
         
-        // Load processed deliveries from localStorage
+        // Load processed deliveries
         const savedProcessed = localStorage.getItem(STORAGE_KEYS.PROCESSED_DELIVERIES);
         if (savedProcessed) {
           try {
@@ -285,7 +301,7 @@ export default function InventoryPage() {
           }
         }
         
-        // Load deliveries
+        // Load deliveries from localStorage
         try {
           const savedDeliveries = localStorage.getItem(STORAGE_KEYS.DELIVERIES);
           if (savedDeliveries) {
@@ -514,6 +530,81 @@ export default function InventoryPage() {
       console.log("Inventory updated and saved");
     }
   };
+
+  // Load inventory from backend to get harvest allocations
+  const loadInventoryFromBackend = async (authToken?: string) => {
+    try {
+      const token = authToken || user?.token || localStorage.getItem('token');
+      console.log('🔍 Attempting backend inventory load, token available:', !!token);
+      
+      if (!token) {
+        console.log('⚠️ No token found, cannot fetch inventory from backend');
+        return;
+      }
+
+      console.log('📡 Fetching inventory from backend...');
+      const res = await fetch('http://localhost:5001/api/inventory', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        console.error('❌ Backend error loading inventory, status:', res.status);
+        const errorText = await res.text();
+        console.error('Error details:', errorText);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.inventory && Array.isArray(data.inventory)) {
+        console.log('✅ Loaded inventory from backend:', data.inventory.length, 'items');
+        console.log('📊 Backend inventory with harvest:', data.inventory.map((i: any) => ({ name: i.name, harvest: i.harvest_to_be_alloted })));
+        
+        // Map backend data to frontend format with calculated totals
+        const backendInventory: InventoryItem[] = data.inventory.map((item: any) => {
+          const total_sacks_of_grains = item.sacks_of_grains_25kg + item.sacks_of_grains_50kg;
+          const total_sacks_of_rice = item.sacks_of_rice_25kg + item.sacks_of_rice_50kg;
+          const total_weight_grains_kg = (item.sacks_of_grains_25kg * 25) + (item.sacks_of_grains_50kg * 50);
+          const total_weight_rice_kg = (item.sacks_of_rice_25kg * 25) + (item.sacks_of_rice_50kg * 50);
+          
+          return {
+            ...item,
+            total_sacks_of_grains,
+            total_sacks_of_rice,
+            total_weight_grains_kg,
+            total_weight_rice_kg,
+            grains_display_condition: item.grains_condition,
+            rice_display_condition: item.rice_condition,
+            harvest_to_be_alloted: item.harvest_to_be_alloted || 0,
+          };
+        });
+        
+        setInventoryData(backendInventory);
+        saveToLocalStorage(backendInventory);
+        console.log('Inventory synced to state and localStorage');
+      }
+    } catch (e) {
+      console.error('Error loading inventory from backend:', e);
+    }
+  };
+
+  // Load inventory from backend immediately after user loads
+  useEffect(() => {
+    if (user?.token) {
+      console.log('User token detected, syncing inventory from backend...');
+      loadInventoryFromBackend(user.token);
+    }
+  }, [user?.token]);
+
+  // Auto-refresh inventory when switching to inventory tab
+  useEffect(() => {
+    if (activeTab === 'inventory' && user?.token && !isLoading) {
+      console.log('Inventory tab active, refreshing from backend...');
+      loadInventoryFromBackend(user.token);
+    }
+  }, [activeTab]);
 
   // Load deliveries and process any completed ones
   useEffect(() => {
@@ -875,6 +966,7 @@ export default function InventoryPage() {
       rice_condition_other: item.rice_condition_other,
       grains_to_plant_sacks_25kg: item.grains_to_plant_sacks_25kg,
       grains_to_plant_sacks_50kg: item.grains_to_plant_sacks_50kg,
+      harvest_to_be_alloted: item.harvest_to_be_alloted,
       remarks: item.remarks,
       user_id: item.user_id,
       created_at: item.created_at,
@@ -909,6 +1001,9 @@ export default function InventoryPage() {
       // Planting - UPDATED: Separate counts for 25kg and 50kg
       grains_to_plant_sacks_25kg: 0,
       grains_to_plant_sacks_50kg: 0,
+      
+      // Harvest to be alloted
+      harvest_to_be_alloted: 0,
       
       // Remarks
       remarks: "",
@@ -954,6 +1049,46 @@ export default function InventoryPage() {
         rice_display_condition,
       };
       
+      // Sync to backend first
+      const token = user?.token || localStorage.getItem('token');
+      if (token) {
+        console.log('💾 Syncing inventory update to backend...');
+        const res = await fetch(`http://localhost:5001/api/inventory/${selectedInventory.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: selectedInventory.name,
+            price_per_unit: selectedInventory.price,
+            sacks_of_grains_25kg: selectedInventory.sacks_of_grains_25kg,
+            sacks_of_grains_50kg: selectedInventory.sacks_of_grains_50kg,
+            sacks_of_rice_25kg: selectedInventory.sacks_of_rice_25kg,
+            sacks_of_rice_50kg: selectedInventory.sacks_of_rice_50kg,
+            grains_condition: selectedInventory.grains_condition,
+            rice_condition: selectedInventory.rice_condition,
+            grains_to_plant_sacks_25kg: selectedInventory.grains_to_plant_sacks_25kg,
+            grains_to_plant_sacks_50kg: selectedInventory.grains_to_plant_sacks_50kg,
+            remarks: selectedInventory.remarks,
+          }),
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json();
+          console.error('❌ Failed to sync to backend:', res.status, errorData);
+          alert('Warning: Changes saved locally but failed to sync to server. Please check your connection.');
+        } else {
+          const result = await res.json();
+          console.log('✅ Successfully synced to backend');
+          
+          // Update harvest allocation from backend response
+          if (result.item && result.item.harvest_to_be_alloted !== undefined) {
+            updatedItem.harvest_to_be_alloted = result.item.harvest_to_be_alloted;
+          }
+        }
+      }
+      
       // Update locally
       const updatedInventory = inventoryData.map(item => 
         item.id === selectedInventory.id 
@@ -961,14 +1096,14 @@ export default function InventoryPage() {
           : item
       );
       setInventoryData(updatedInventory);
+      saveToLocalStorage(updatedInventory);
       
       setIsModalOpen(false);
       alert("Inventory updated successfully!");
       
     } catch (error) {
       console.error("Error updating inventory:", error);
-      setIsModalOpen(false);
-      alert("Inventory updated successfully!");
+      alert("Error updating inventory. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -1059,61 +1194,116 @@ export default function InventoryPage() {
 
     setIsSaving(true);
     try {
-      // Calculate totals
-      const total_sacks_of_grains = newItem.sacks_of_grains_25kg + newItem.sacks_of_grains_50kg;
-      const total_sacks_of_rice = newItem.sacks_of_rice_25kg + newItem.sacks_of_rice_50kg;
-      const total_weight_grains_kg = (newItem.sacks_of_grains_25kg * 25) + (newItem.sacks_of_grains_50kg * 50);
-      const total_weight_rice_kg = (newItem.sacks_of_rice_25kg * 25) + (newItem.sacks_of_rice_50kg * 50);
+      // Sync to backend first
+      const token = user?.token || localStorage.getItem('token');
+      let backendItem: InventoryItem | null = null;
       
-      // Determine display conditions
-      const grains_display_condition = newItem.grains_condition;
-      const rice_display_condition = newItem.rice_condition;
+      if (token) {
+        console.log('💾 Adding new inventory item to backend...');
+        const res = await fetch('http://localhost:5001/api/inventory', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: newItem.name,
+            price: newItem.price,
+            sacks_of_grains_25kg: newItem.sacks_of_grains_25kg,
+            sacks_of_grains_50kg: newItem.sacks_of_grains_50kg,
+            sacks_of_rice_25kg: newItem.sacks_of_rice_25kg,
+            sacks_of_rice_50kg: newItem.sacks_of_rice_50kg,
+            grains_condition: newItem.grains_condition,
+            rice_condition: newItem.rice_condition,
+            grains_to_plant_sacks_25kg: newItem.grains_to_plant_sacks_25kg,
+            grains_to_plant_sacks_50kg: newItem.grains_to_plant_sacks_50kg,
+            remarks: newItem.remarks,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          console.log('✅ Successfully added to backend with ID:', data.id);
+          
+          // Use backend-assigned ID and data
+          const total_sacks_of_grains = newItem.sacks_of_grains_25kg + newItem.sacks_of_grains_50kg;
+          const total_sacks_of_rice = newItem.sacks_of_rice_25kg + newItem.sacks_of_rice_50kg;
+          const total_weight_grains_kg = (newItem.sacks_of_grains_25kg * 25) + (newItem.sacks_of_grains_50kg * 50);
+          const total_weight_rice_kg = (newItem.sacks_of_rice_25kg * 25) + (newItem.sacks_of_rice_50kg * 50);
+          
+          backendItem = {
+            id: data.id,
+            name: newItem.name,
+            price: newItem.price,
+            sacks_of_grains_25kg: newItem.sacks_of_grains_25kg,
+            sacks_of_grains_50kg: newItem.sacks_of_grains_50kg,
+            sacks_of_rice_25kg: newItem.sacks_of_rice_25kg,
+            sacks_of_rice_50kg: newItem.sacks_of_rice_50kg,
+            total_sacks_of_grains,
+            total_sacks_of_rice,
+            total_weight_grains_kg,
+            total_weight_rice_kg,
+            grains_condition: newItem.grains_condition,
+            grains_condition_other: newItem.grains_condition_other,
+            grains_display_condition: newItem.grains_condition,
+            rice_condition: newItem.rice_condition,
+            rice_condition_other: newItem.rice_condition_other,
+            rice_display_condition: newItem.rice_condition,
+            grains_to_plant_sacks_25kg: newItem.grains_to_plant_sacks_25kg,
+            grains_to_plant_sacks_50kg: newItem.grains_to_plant_sacks_50kg,
+            harvest_to_be_alloted: 0,
+            remarks: newItem.remarks,
+            user_id: data.user_id || 1,
+            created_at: data.created_at || new Date().toISOString(),
+          };
+        } else {
+          console.error('❌ Failed to add to backend:', res.status);
+          alert('Warning: Failed to save to server. Item will only exist locally.');
+        }
+      }
       
-      // Generate new ID (max existing ID + 1)
-      const newId = inventoryData.length > 0 
-        ? Math.max(...inventoryData.map(item => item.id)) + 1 
-        : 1;
-      
-      // Create new inventory item
-      const newInventoryItem: InventoryItem = {
-        id: newId,
-        name: newItem.name,
-        price: newItem.price,
+      // If backend sync failed or no token, create locally with local ID
+      if (!backendItem) {
+        const total_sacks_of_grains = newItem.sacks_of_grains_25kg + newItem.sacks_of_grains_50kg;
+        const total_sacks_of_rice = newItem.sacks_of_rice_25kg + newItem.sacks_of_rice_50kg;
+        const total_weight_grains_kg = (newItem.sacks_of_grains_25kg * 25) + (newItem.sacks_of_grains_50kg * 50);
+        const total_weight_rice_kg = (newItem.sacks_of_rice_25kg * 25) + (newItem.sacks_of_rice_50kg * 50);
         
-        // Detailed sack counts
-        sacks_of_grains_25kg: newItem.sacks_of_grains_25kg,
-        sacks_of_grains_50kg: newItem.sacks_of_grains_50kg,
-        sacks_of_rice_25kg: newItem.sacks_of_rice_25kg,
-        sacks_of_rice_50kg: newItem.sacks_of_rice_50kg,
+        const newId = inventoryData.length > 0 
+          ? Math.max(...inventoryData.map(item => item.id)) + 1 
+          : 1;
         
-        // Totals
-        total_sacks_of_grains,
-        total_sacks_of_rice,
-        total_weight_grains_kg,
-        total_weight_rice_kg,
-        
-        // Condition categories
-        grains_condition: newItem.grains_condition,
-        grains_condition_other: newItem.grains_condition_other,
-        grains_display_condition,
-        rice_condition: newItem.rice_condition,
-        rice_condition_other: newItem.rice_condition_other,
-        rice_display_condition,
-        
-        // Planting - UPDATED: Separate counts for 25kg and 50kg
-        grains_to_plant_sacks_25kg: newItem.grains_to_plant_sacks_25kg,
-        grains_to_plant_sacks_50kg: newItem.grains_to_plant_sacks_50kg,
-        
-        // Remarks
-        remarks: newItem.remarks,
-        
-        user_id: 1,
-        created_at: new Date().toISOString(),
-      };
+        backendItem = {
+          id: newId,
+          name: newItem.name,
+          price: newItem.price,
+          sacks_of_grains_25kg: newItem.sacks_of_grains_25kg,
+          sacks_of_grains_50kg: newItem.sacks_of_grains_50kg,
+          sacks_of_rice_25kg: newItem.sacks_of_rice_25kg,
+          sacks_of_rice_50kg: newItem.sacks_of_rice_50kg,
+          total_sacks_of_grains,
+          total_sacks_of_rice,
+          total_weight_grains_kg,
+          total_weight_rice_kg,
+          grains_condition: newItem.grains_condition,
+          grains_condition_other: newItem.grains_condition_other,
+          grains_display_condition: newItem.grains_condition,
+          rice_condition: newItem.rice_condition,
+          rice_condition_other: newItem.rice_condition_other,
+          rice_display_condition: newItem.rice_condition,
+          grains_to_plant_sacks_25kg: newItem.grains_to_plant_sacks_25kg,
+          grains_to_plant_sacks_50kg: newItem.grains_to_plant_sacks_50kg,
+          harvest_to_be_alloted: 0,
+          remarks: newItem.remarks,
+          user_id: 1,
+          created_at: new Date().toISOString(),
+        };
+      }
       
       // Add locally
-      const updatedInventory = [...inventoryData, newInventoryItem];
+      const updatedInventory = [...inventoryData, backendItem];
       setInventoryData(updatedInventory);
+      saveToLocalStorage(updatedInventory);
       
       handleCloseAddModal();
       alert("Rice variety added successfully!");
@@ -1229,7 +1419,27 @@ export default function InventoryPage() {
     if (isEditMode && selectedInventory) {
       const key = `sacks_of_${type}` as keyof EditableInventoryItem;
       const currentValue = selectedInventory[key] as number;
-      setSelectedInventory(prev => prev ? { ...prev, [key]: Math.max(0, currentValue + delta) } : null);
+      
+      // If adding rice sacks, check if there's enough harvest available
+      if ((type === 'rice_25kg' || type === 'rice_50kg') && delta > 0) {
+        const kgToDeduct = delta * (type === 'rice_25kg' ? 25 : 50);
+        
+        // Check if there's enough harvest available
+        if (kgToDeduct > selectedInventory.harvest_to_be_alloted) {
+          alert(`Not enough harvest available! Only ${selectedInventory.harvest_to_be_alloted}kg remaining, but you're trying to add ${kgToDeduct}kg.`);
+          return;
+        }
+        
+        const newHarvest = Math.max(0, selectedInventory.harvest_to_be_alloted - kgToDeduct);
+        
+        setSelectedInventory(prev => prev ? { 
+          ...prev, 
+          [key]: Math.max(0, currentValue + delta),
+          harvest_to_be_alloted: newHarvest
+        } : null);
+      } else {
+        setSelectedInventory(prev => prev ? { ...prev, [key]: Math.max(0, currentValue + delta) } : null);
+      }
     } else {
       const key = `sacks_of_${type}` as keyof typeof newItem;
       const currentValue = newItem[key] as number;
@@ -2518,6 +2728,24 @@ export default function InventoryPage() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold text-slate-900">Rice Inventory</h3>
                   
+                  {/* Harvest To Be Alloted Display */}
+                  {selectedInventory.harvest_to_be_alloted > 0 && (
+                    <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
+                      <div className="flex items-center gap-2 mb-1">
+                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-blue-900 font-semibold">Harvest Available to Allot</span>
+                      </div>
+                      <p className="text-2xl font-bold text-blue-700">
+                        {selectedInventory.harvest_to_be_alloted.toLocaleString()} kg
+                      </p>
+                      <p className="text-sm text-blue-600 mt-1">
+                        This amount will be automatically deducted as you add rice sacks below
+                      </p>
+                    </div>
+                  )}
+                  
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
                       <div className="flex items-center justify-between mb-2">
@@ -2537,8 +2765,14 @@ export default function InventoryPage() {
                           />
                           <button
                             onClick={() => handleSackChange('rice_25kg', 1, true)}
-                            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
+                            disabled={selectedInventory.harvest_to_be_alloted < 25}
+                            className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold transition ${
+                              selectedInventory.harvest_to_be_alloted < 25
+                                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                                : 'bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 text-slate-700 hover:text-green-700'
+                            }`}
                             aria-label="Increase 25kg sacks of rice"
+                            title={selectedInventory.harvest_to_be_alloted < 25 ? `Not enough harvest (only ${selectedInventory.harvest_to_be_alloted}kg available)` : ''}
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -2569,7 +2803,13 @@ export default function InventoryPage() {
                           />
                           <button
                             onClick={() => handleSackChange('rice_50kg', 1, true)}
-                            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
+                            disabled={selectedInventory.harvest_to_be_alloted < 50}
+                            className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold transition ${
+                              selectedInventory.harvest_to_be_alloted < 50
+                                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
+                                : 'bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 text-slate-700 hover:text-green-700'
+                            }`}
+                            title={selectedInventory.harvest_to_be_alloted < 50 ? `Not enough harvest (only ${selectedInventory.harvest_to_be_alloted}kg available)` : ''}
                             aria-label="Increase 50kg sacks of rice"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

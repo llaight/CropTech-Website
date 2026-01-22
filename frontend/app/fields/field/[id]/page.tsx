@@ -512,26 +512,28 @@ export default function FieldDetailPage() {
         
         // Deduct from inventory after successful crop creation
         try {
-          console.log(`🌾 Deducting ${plantedGrainNum} kg of ${cropName} from inventory...`);
+          console.log(`Deducting ${sacks50kg} × 50kg + ${sacks25kg} × 25kg = ${plantedGrainNum} kg of ${cropName} from inventory...`);
           const deductRes = await fetch(`http://127.0.0.1:5001/api/inventory/deduct-grain`, {
             method: "POST",
             headers,
             body: JSON.stringify({
               crop_name: cropName,
               quantity_kg: plantedGrainNum,
+              sacks_50kg: sacks50kg,
+              sacks_25kg: sacks25kg,
             }),
           });
           
           if (deductRes.ok) {
             const deductData = await deductRes.json().catch(() => ({}));
-            console.log(`✅ Grain deducted successfully:`, deductData);
+            console.log(`Grain deducted successfully:`, deductData);
             
             // Clear inventory cache so it refreshes from backend
             try {
               localStorage.removeItem('cachedInventoryData');
               localStorage.removeItem('rice_inventory_data');
               localStorage.removeItem('rice_inventory_last_sync');
-              console.log('✅ Cleared inventory cache');
+              console.log('Cleared inventory cache');
             } catch (e) {
               console.error('Error clearing inventory cache:', e);
             }
@@ -764,7 +766,7 @@ export default function FieldDetailPage() {
 
       // If not in cache, fetch from backend
       if (!fieldData) {
-        console.log("❌ Field not in cache, fetching from backend...");
+        console.log("Field not in cache, fetching from backend...");
         try {
           const res = await fetch(
             `http://127.0.0.1:5001/api/fields?id=${encodeURIComponent(String(fieldId))}`,
@@ -778,7 +780,7 @@ export default function FieldDetailPage() {
             }
             if (f) {
               fieldData = f;
-              console.log("📡 Field fetched from backend:", fieldData);
+              console.log("Field fetched from backend:", fieldData);
             }
           }
         } catch (err) {
@@ -929,7 +931,7 @@ export default function FieldDetailPage() {
                 fetchedCrop.notes ||
                 "Crop data from database. Health status auto-derived from planting age when available.",
             });
-            console.log("🌾 Crop data loaded:", fetchedCrop);
+            console.log("Crop data loaded:", fetchedCrop);
           } else {
             console.log("No crop data found for this field");
           }

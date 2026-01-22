@@ -468,6 +468,7 @@ def list_inventory():
                 grains_condition, grains_condition_other,
                 rice_condition, rice_condition_other,
                 grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
+                harvest_to_be_alloted,
                 remarks, type, user_id, created_at 
             FROM inventory 
             WHERE user_id=%s 
@@ -484,6 +485,7 @@ def list_inventory():
              grains_condition, grains_condition_other,
              rice_condition, rice_condition_other,
              grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
+             harvest_to_be_alloted,
              remarks, type_val, uid, created_at) = row
             
             # Convert created_at to ISO string
@@ -530,6 +532,9 @@ def list_inventory():
                 # Planting - UPDATED: Separate counts for 25kg and 50kg
                 "grains_to_plant_sacks_25kg": grains_to_plant_sacks_25kg,
                 "grains_to_plant_sacks_50kg": grains_to_plant_sacks_50kg,
+                
+                # Harvest to be alloted
+                "harvest_to_be_alloted": harvest_to_be_alloted or 0,
                 
                 # Remarks
                 "remarks": remarks,
@@ -668,6 +673,8 @@ def deduct_grain():
     data = request.get_json() or {}
     crop_name = data.get("crop_name", "").strip()
     quantity_kg = data.get("quantity_kg", 0)
+    sacks_50kg_to_deduct = data.get("sacks_50kg", 0)
+    sacks_25kg_to_deduct = data.get("sacks_25kg", 0)
 
     if not crop_name or quantity_kg <= 0:
         return jsonify({"message": "crop_name and quantity_kg are required"}), 400
@@ -705,31 +712,47 @@ def deduct_grain():
                 "message": f"Insufficient grain. Required: {quantity_kg} kg, Available: {current_total_kg} kg"
             }), 400
 
-        # Deduct from 50kg sacks first, then 25kg sacks
-        remaining_to_deduct = quantity_kg
-        new_sacks_50kg = sacks_50kg
-        new_sacks_25kg = sacks_25kg
+        # If specific sack counts are provided, use them directly
+        if sacks_50kg_to_deduct > 0 or sacks_25kg_to_deduct > 0:
+            # Validate that enough sacks are available
+            if sacks_50kg_to_deduct > sacks_50kg:
+                return jsonify({
+                    "message": f"Insufficient 50kg sacks. Required: {sacks_50kg_to_deduct}, Available: {sacks_50kg}"
+                }), 400
+            if sacks_25kg_to_deduct > sacks_25kg:
+                return jsonify({
+                    "message": f"Insufficient 25kg sacks. Required: {sacks_25kg_to_deduct}, Available: {sacks_25kg}"
+                }), 400
+            
+            # Deduct the exact sacks specified
+            new_sacks_50kg = sacks_50kg - sacks_50kg_to_deduct
+            new_sacks_25kg = sacks_25kg - sacks_25kg_to_deduct
+        else:
+            # Legacy behavior: Deduct from 50kg sacks first, then 25kg sacks
+            remaining_to_deduct = quantity_kg
+            new_sacks_50kg = sacks_50kg
+            new_sacks_25kg = sacks_25kg
 
-        # Deduct from 50kg sacks
-        sacks_to_remove_50kg = int(remaining_to_deduct // 50)
-        if sacks_to_remove_50kg > 0:
-            if sacks_to_remove_50kg <= new_sacks_50kg:
-                new_sacks_50kg -= sacks_to_remove_50kg
-                remaining_to_deduct -= sacks_to_remove_50kg * 50
-            else:
-                remaining_to_deduct -= new_sacks_50kg * 50
-                new_sacks_50kg = 0
-
-        # Deduct from 25kg sacks
-        if remaining_to_deduct > 0:
-            sacks_to_remove_25kg = int(remaining_to_deduct // 25)
-            if sacks_to_remove_25kg > 0:
-                if sacks_to_remove_25kg <= new_sacks_25kg:
-                    new_sacks_25kg -= sacks_to_remove_25kg
-                    remaining_to_deduct -= sacks_to_remove_25kg * 25
+            # Deduct from 50kg sacks
+            sacks_to_remove_50kg = int(remaining_to_deduct // 50)
+            if sacks_to_remove_50kg > 0:
+                if sacks_to_remove_50kg <= new_sacks_50kg:
+                    new_sacks_50kg -= sacks_to_remove_50kg
+                    remaining_to_deduct -= sacks_to_remove_50kg * 50
                 else:
-                    remaining_to_deduct -= new_sacks_25kg * 25
-                    new_sacks_25kg = 0
+                    remaining_to_deduct -= new_sacks_50kg * 50
+                    new_sacks_50kg = 0
+
+            # Deduct from 25kg sacks
+            if remaining_to_deduct > 0:
+                sacks_to_remove_25kg = int(remaining_to_deduct // 25)
+                if sacks_to_remove_25kg > 0:
+                    if sacks_to_remove_25kg <= new_sacks_25kg:
+                        new_sacks_25kg -= sacks_to_remove_25kg
+                        remaining_to_deduct -= sacks_to_remove_25kg * 25
+                    else:
+                        remaining_to_deduct -= new_sacks_25kg * 25
+                        new_sacks_25kg = 0
 
         # Update both grains_to_plant_sacks and sacks_of_grains to keep them in sync
         cursor.execute("""
@@ -845,6 +868,30 @@ def update_inventory_item(item_id):
             updates.append("grains_to_plant_sacks_50kg = %s")
             values.append(data["grains_to_plant_sacks_50kg"])
         
+        # Handle harvest_to_be_alloted deduction when adding rice sacks
+        if "sacks_of_rice_25kg" in data or "sacks_of_rice_50kg" in data:
+            # Get current values to calculate the difference
+            cursor.execute(
+                "SELECT sacks_of_rice_25kg, sacks_of_rice_50kg, harvest_to_be_alloted FROM inventory WHERE item_id = %s",
+                (item_id,)
+            )
+            current_row = cursor.fetchone()
+            if current_row:
+                current_rice_25kg, current_rice_50kg, current_alloted = current_row
+                new_rice_25kg = data.get("sacks_of_rice_25kg", current_rice_25kg)
+                new_rice_50kg = data.get("sacks_of_rice_50kg", current_rice_50kg)
+                
+                # Calculate kg added
+                added_25kg = (new_rice_25kg - current_rice_25kg) * 25
+                added_50kg = (new_rice_50kg - current_rice_50kg) * 50
+                total_added_kg = added_25kg + added_50kg
+                
+                # Deduct from harvest_to_be_alloted
+                if total_added_kg > 0:
+                    new_alloted = max(0, (current_alloted or 0) - total_added_kg)
+                    updates.append("harvest_to_be_alloted = %s")
+                    values.append(new_alloted)
+        
         # Remarks
         if "remarks" in data:
             updates.append("remarks = %s")
@@ -868,14 +915,29 @@ def update_inventory_item(item_id):
             conn.commit()
             
             if updated_row:
-                # Parse the returned row
-                (item_id, name, price_per_unit, 
-                 sacks_of_grains_25kg, sacks_of_grains_50kg,
-                 sacks_of_rice_25kg, sacks_of_rice_50kg,
-                 grains_condition, grains_condition_other,
-                 rice_condition, rice_condition_other,
-                 grains_to_plant_sacks_25kg, grains_to_plant_sacks_50kg,
-                 remarks, type_val, uid, created_at) = updated_row
+                # Parse the returned row - handle variable column count
+                columns = [desc[0] for desc in cursor.description]
+                row_dict = dict(zip(columns, updated_row))
+                
+                # Extract values from dictionary
+                item_id = row_dict.get('item_id')
+                name = row_dict.get('name')
+                price_per_unit = row_dict.get('price_per_unit')
+                sacks_of_grains_25kg = row_dict.get('sacks_of_grains_25kg', 0)
+                sacks_of_grains_50kg = row_dict.get('sacks_of_grains_50kg', 0)
+                sacks_of_rice_25kg = row_dict.get('sacks_of_rice_25kg', 0)
+                sacks_of_rice_50kg = row_dict.get('sacks_of_rice_50kg', 0)
+                grains_condition = row_dict.get('grains_condition')
+                grains_condition_other = row_dict.get('grains_condition_other')
+                rice_condition = row_dict.get('rice_condition')
+                rice_condition_other = row_dict.get('rice_condition_other')
+                grains_to_plant_sacks_25kg = row_dict.get('grains_to_plant_sacks_25kg', 0)
+                grains_to_plant_sacks_50kg = row_dict.get('grains_to_plant_sacks_50kg', 0)
+                harvest_to_be_alloted = row_dict.get('harvest_to_be_alloted', 0)
+                remarks = row_dict.get('remarks')
+                type_val = row_dict.get('type')
+                uid = row_dict.get('user_id')
+                created_at = row_dict.get('created_at')
                 
                 # Calculate totals
                 total_sacks_of_grains = sacks_of_grains_25kg + sacks_of_grains_50kg
@@ -916,6 +978,9 @@ def update_inventory_item(item_id):
                         # Planting - UPDATED: Separate counts for 25kg and 50kg
                         "grains_to_plant_sacks_25kg": grains_to_plant_sacks_25kg,
                         "grains_to_plant_sacks_50kg": grains_to_plant_sacks_50kg,
+                        
+                        # Harvest to be alloted
+                        "harvest_to_be_alloted": harvest_to_be_alloted or 0,
                         
                         # Remarks
                         "remarks": remarks,
@@ -1540,6 +1605,39 @@ def harvest_crop(crop_id: int):
         # Update field status to available
         if field_id:
             cursor.execute("UPDATE fields SET status = 'available' WHERE field_id = %s;", (field_id,))
+
+        # Update inventory: add actual_yield_kg to harvest_to_be_alloted for this crop
+        if final_actual_yield and final_actual_yield > 0:
+            # Find or create inventory item for this crop
+            cursor.execute(
+                """
+                SELECT item_id, harvest_to_be_alloted
+                FROM inventory
+                WHERE name = %s AND user_id = %s
+                LIMIT 1;
+                """,
+                (crop_name, user_id),
+            )
+            inv_row = cursor.fetchone()
+            
+            if inv_row:
+                # Update existing inventory item
+                item_id, current_alloted = inv_row
+                new_alloted = (current_alloted or 0) + final_actual_yield
+                cursor.execute(
+                    "UPDATE inventory SET harvest_to_be_alloted = %s WHERE item_id = %s;",
+                    (new_alloted, item_id),
+                )
+            else:
+                # Create new inventory item with the harvest
+                cursor.execute(
+                    """
+                    INSERT INTO inventory (name, user_id, harvest_to_be_alloted, type)
+                    VALUES (%s, %s, %s, 'rice_variety')
+                    RETURNING item_id;
+                    """,
+                    (crop_name, user_id, final_actual_yield),
+                )
 
         conn.commit()
 

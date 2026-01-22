@@ -142,6 +142,9 @@ def create_tables():
                    grains_to_plant_sacks_25kg INTEGER DEFAULT 0,
                    grains_to_plant_sacks_50kg INTEGER DEFAULT 0,
                    
+                   -- Harvest to be alloted: holds actual_yield_kg from harvest
+                   harvest_to_be_alloted FLOAT DEFAULT 0,
+                   
                    -- General remarks/notes
                    remarks TEXT,
                    
@@ -162,6 +165,7 @@ def create_tables():
     cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS rice_condition_other TEXT;")
     cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_to_plant_sacks_25kg INTEGER DEFAULT 0;")
     cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS grains_to_plant_sacks_50kg INTEGER DEFAULT 0;")
+    cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS harvest_to_be_alloted FLOAT DEFAULT 0;")
     cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS remarks TEXT;")
     cursor.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS type TEXT;")
     
