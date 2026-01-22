@@ -2568,3 +2568,230 @@ def download_user_guide():
             
     except Exception as e:
         return jsonify({"message": "Error serving PDF", "error": str(e)}), 500
+    
+
+# -------------------------
+# Forgot Password - Request Reset
+# -------------------------
+@bp.route("/forgot-password", methods=["POST"])
+def forgot_password():
+    data = request.get_json() or {}
+    email = data.get("email")
+    
+    if not email:
+        return jsonify({"message": "Email is required"}), 400
+    
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        # Check if user exists
+        cursor.execute("SELECT user_id, name, email FROM users WHERE email=%s;", (email,))
+        user = cursor.fetchone()
+        
+        if not user:
+            # For security, don't reveal if user exists or not
+            cursor.close()
+            conn.close()
+            # Still return success to prevent email enumeration
+            return jsonify({"message": "email is not existing or incorrect. Please check."}), 200
+        
+        user_id, name, user_email = user
+        
+        # Generate reset token (use a simple token for local testing)
+        import secrets
+        import string
+        token = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+        
+        # Token expires in 1 hour
+        from datetime import datetime, timedelta
+        expires_at = datetime.utcnow() + timedelta(hours=1)
+        
+        # Store token in database
+        cursor.execute("""
+            INSERT INTO password_reset_tokens (user_id, email, token, expires_at, used)
+            VALUES (%s, %s, %s, %s, FALSE)
+            RETURNING token_id;
+        """, (user_id, email, token, expires_at))
+        
+        conn.commit()
+        
+        # In a production environment, you would send an email here.
+        # For local testing, we'll just return the reset link in the response.
+        # NEVER do this in production!
+        
+        # Use localhost:3000 for Next.js frontend
+        reset_link = f"http://localhost:3000/reset-password/{token}"
+        
+        print(f"=== LOCAL DEVELOPMENT MODE ===")
+        print(f"Reset password for: {email}")
+        print(f"Reset link: {reset_link}")
+        print(f"Token: {token}")
+        print(f"=============================")
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error processing request", "error": str(e)}), 500
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        "message": "We sent password reset instructions.",
+        "dev_mode_link": reset_link  # Only include in development
+    }), 200
+
+# -------------------------
+# Validate Reset Token
+# -------------------------
+@bp.route("/validate-reset-token/<token>", methods=["GET"])
+def validate_reset_token(token):
+    if not token:
+        return jsonify({"valid": False, "message": "Token is required"}), 400
+    
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"valid": False, "message": "Database connection not available"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        # Check token validity
+        cursor.execute("""
+            SELECT token_id, user_id, email, expires_at, used 
+            FROM password_reset_tokens 
+            WHERE token=%s;
+        """, (token,))
+        
+        token_data = cursor.fetchone()
+        
+        if not token_data:
+            cursor.close()
+            conn.close()
+            return jsonify({"valid": False, "message": "Invalid or expired token"}), 400
+        
+        token_id, user_id, email, expires_at, used = token_data
+        
+        # Check if token is used
+        if used:
+            cursor.close()
+            conn.close()
+            return jsonify({"valid": False, "message": "Token has already been used"}), 400
+        
+        # Check if token is expired
+        from datetime import datetime
+        if expires_at < datetime.utcnow():
+            cursor.close()
+            conn.close()
+            return jsonify({"valid": False, "message": "Token has expired"}), 400
+        
+        # Check if user still exists
+        cursor.execute("SELECT user_id FROM users WHERE user_id=%s AND email=%s;", (user_id, email))
+        user = cursor.fetchone()
+        
+        if not user:
+            cursor.close()
+            conn.close()
+            return jsonify({"valid": False, "message": "User no longer exists"}), 400
+        
+        cursor.close()
+        conn.close()
+        return jsonify({
+            "valid": True,
+            "message": "Token is valid",
+            "email": email
+        }), 200
+        
+    except Exception as e:
+        cursor.close()
+        conn.close()
+        return jsonify({"valid": False, "message": "Error validating token", "error": str(e)}), 500
+
+
+# -------------------------
+# Reset Password with Token
+# -------------------------
+@bp.route("/reset-password", methods=["POST"])
+def reset_password():
+    data = request.get_json() or {}
+    token = data.get("token")
+    new_password = data.get("new_password")
+    confirm_password = data.get("confirm_password")
+    
+    if not token or not new_password or not confirm_password:
+        return jsonify({"message": "Token, new password, and confirmation are required"}), 400
+    
+    if new_password != confirm_password:
+        return jsonify({"message": "Passwords do not match"}), 400
+    
+    if len(new_password) < 8:
+        return jsonify({"message": "Password must be at least 8 characters"}), 400
+    
+    conn = get_connection()
+    if conn is None:
+        return jsonify({"message": "Database connection not available"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        # Validate token first
+        cursor.execute("""
+            SELECT token_id, user_id, email, expires_at, used 
+            FROM password_reset_tokens 
+            WHERE token=%s;
+        """, (token,))
+        
+        token_data = cursor.fetchone()
+        
+        if not token_data:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Invalid or expired token"}), 400
+        
+        token_id, user_id, email, expires_at, used = token_data
+        
+        # Check if token is used
+        if used:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Token has already been used"}), 400
+        
+        # Check if token is expired
+        from datetime import datetime
+        if expires_at < datetime.utcnow():
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Token has expired"}), 400
+        
+        # Update user password
+        hashed_password = generate_password_hash(new_password)
+        cursor.execute("""
+            UPDATE users 
+            SET password=%s 
+            WHERE user_id=%s AND email=%s;
+        """, (hashed_password, user_id, email))
+        
+        # Mark token as used
+        cursor.execute("""
+            UPDATE password_reset_tokens 
+            SET used=TRUE 
+            WHERE token_id=%s;
+        """, (token_id,))
+        
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error resetting password", "error": str(e)}), 500
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({"message": "Password has been reset successfully. You can now sign in."}), 200

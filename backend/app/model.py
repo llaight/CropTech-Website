@@ -305,6 +305,27 @@ def create_tables():
                    )
             """)
     
+    # password reset tokens table - ADDED FOR PASSWORD RESET FUNCTIONALITY
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens(
+                   token_id SERIAL PRIMARY KEY,
+                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                   email TEXT NOT NULL,
+                   token TEXT NOT NULL UNIQUE,
+                   expires_at TIMESTAMP NOT NULL,
+                   used BOOLEAN DEFAULT FALSE,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )
+            """)
+    
+    # Add columns for existing deployments
+    cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS user_id INTEGER;")
+    cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS email TEXT;")
+    cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS token TEXT;")
+    cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;")
+    cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS used BOOLEAN DEFAULT FALSE;")
+    cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+    
     conn.commit()
     cursor.close()
     conn.close()
