@@ -1096,6 +1096,29 @@ def create_field():
     if not user_id:
         user_id = data.get("user_id")
 
+    # Extract lat/lon from location string and reverse geocode
+    city = None
+    state = None
+    try:
+        if location and isinstance(location, str) and "," in location:
+            lat_str, lon_str = location.split(",", 1)
+            lat_f = float(lat_str.strip())
+            lon_f = float(lon_str.strip())
+            
+            # Reverse geocode to get city and state
+            loc = _geolocator.reverse((lat_f, lon_f), exactly_one=True, language='en', timeout=10)
+            if loc:
+                raw = getattr(loc, 'raw', {}) or {}
+                address = raw.get('address', {}) if isinstance(raw, dict) else {}
+                city = (address.get('city') or address.get('town') or address.get('village') or
+                        address.get('hamlet') or address.get('county') or None)
+                state = address.get('state') or address.get('region') or None
+    except Exception as e:
+        # Log geocoding error but don't fail field creation
+        print(f"Reverse geocoding failed for {location}: {str(e)}")
+        city = None
+        state = None
+
     conn = get_connection()
     if conn is None:
         return jsonify({"message": "Database connection not available"}), 500
@@ -1103,10 +1126,10 @@ def create_field():
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            INSERT INTO fields (name, location, user_id, area_ha, status)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO fields (name, location, user_id, area_ha, status, city, state)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING field_id;
-        """, (name, location, user_id, area_ha, status))
+        """, (name, location, user_id, area_ha, status, city, state))
         row = cursor.fetchone()
         conn.commit()
         field_id = row[0] if row else None
@@ -1119,7 +1142,7 @@ def create_field():
 
     cursor.close()
     conn.close()
-    return jsonify({"field": {"id": field_id, "name": response_name, "location": location, "user_id": user_id, "area_ha": area_ha, "status": status}}), 201
+    return jsonify({"field": {"id": field_id, "name": response_name, "location": location, "user_id": user_id, "area_ha": area_ha, "status": status, "city": city, "state": state}}), 201
 
 
 @bp.route("/fields", methods=["GET"]) 
@@ -1136,7 +1159,7 @@ def list_fields():
     try:
         # Use LEFT JOIN to get the first crop name for each field in one query
         base_query = """
-            SELECT f.field_id, f.name, f.location, f.user_id, f.area_ha, f.status, c.name
+            SELECT f.field_id, f.name, f.location, f.user_id, f.area_ha, f.status, f.city, f.state, c.name
             FROM fields f
             LEFT JOIN (
                 SELECT DISTINCT ON (field_id) field_id, name 
@@ -1163,7 +1186,7 @@ def list_fields():
         rows = cursor.fetchall()
         fields = []
         for row in rows:
-            fid, fname, location, uid, area_ha, status, crop_name = row
+            fid, fname, location, uid, area_ha, status, city, state, crop_name = row
             display_name = fname or (crop_name + f" Field {fid}" if crop_name else f"Field {fid}")
             fields.append({
                 "id": fid, 
@@ -1172,6 +1195,8 @@ def list_fields():
                 "user_id": uid,
                 "area_ha": area_ha,
                 "status": status,
+                "city": city,
+                "state": state,
                 "crop_name": crop_name
             })
     except Exception as e:

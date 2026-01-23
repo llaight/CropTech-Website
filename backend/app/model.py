@@ -67,7 +67,9 @@ def create_tables():
                    location TEXT NOT NULL,
                    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
                    area_ha FLOAT,
-                   status TEXT DEFAULT 'available' CHECK (status IN ('available', 'occupied'))
+                   status TEXT DEFAULT 'available' CHECK (status IN ('available', 'occupied')),
+                   city TEXT,
+                   state TEXT
                   )
             """)
 
@@ -75,6 +77,8 @@ def create_tables():
     cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS name TEXT;")
     cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS area_ha FLOAT;")
     cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'available';")
+    cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS city TEXT;")
+    cursor.execute("ALTER TABLE fields ADD COLUMN IF NOT EXISTS state TEXT;")
     cursor.execute("""
         DO $$
         BEGIN

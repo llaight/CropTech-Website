@@ -164,6 +164,8 @@ export default function LandTrackerPage() {
             status: f.status || 'available',
             coordinates: [],
             center,
+            city: f.city || null,
+            state: f.state || null,
             planting_date: null, // Will be populated from crops API
             health_status: null, // Will be populated from crops API
           } as FieldData;
@@ -193,25 +195,6 @@ export default function LandTrackerPage() {
             }
           } catch (e) {
             console.error(`Error fetching crops for field ${ff.id}:`, e);
-          }
-
-          // Reverse-geocode each field's center to obtain city and state (only if not cached)
-          if (!fromCache) {
-            try {
-              const [lat, lon] = ff.center;
-              if (lat !== 0 || lon !== 0) {
-                const r = await fetch(`http://localhost:5001/api/reverse-geocode?lat=${lat}&lon=${lon}`);
-                if (r.ok) {
-                  const j = await r.json().catch(() => ({}));
-                  ff.city = j.city || null;
-                  ff.state = j.state || null;
-                }
-              }
-            } catch (e) {
-              // ignore per-field reverse geocode errors
-              ff.city = null;
-              ff.state = null;
-            }
           }
         }
 

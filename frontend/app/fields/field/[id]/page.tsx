@@ -849,26 +849,13 @@ export default function FieldDetailPage() {
       }
 
       // Reverse geocode to get city name
-      if (latNum !== null && lonNum !== null) {
-        try {
-          const gRes = await fetch(
-            `http://127.0.0.1:5001/api/reverse-geocode?lat=${encodeURIComponent(
-              String(latNum)
-            )}&lon=${encodeURIComponent(String(lonNum))}`,
-            { cache: "no-store" }
-          );
-          if (gRes.ok) {
-            const gData = await gRes.json().catch(() => ({}));
-            const parts: string[] = [];
-            if (gData.city) parts.push(gData.city);
-            if (gData.state) parts.push(gData.state);
-            const city = parts.length > 0 ? parts.join(", ") : gData.display_name ?? null;
-            setCityName(city);
-            console.log("City name loaded:", city);
-          }
-        } catch (e) {
-          console.error("Error reverse geocoding:", e);
-        }
+      if (fieldData && (fieldData.city || fieldData.state)) {
+        const parts: string[] = [];
+        if (fieldData.city) parts.push(fieldData.city);
+        if (fieldData.state) parts.push(fieldData.state);
+        const city = parts.length > 0 ? parts.join(", ") : null;
+        setCityName(city);
+        console.log("City name loaded from field data:", city);
       }
 
       // Fetch weather data
