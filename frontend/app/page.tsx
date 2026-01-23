@@ -22,6 +22,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<{ id?: number; name?: string; role?: string } | null>(null);
   const [stats, setStats] = useState({ totalFields: 0, activeCrops: 0, harvestYieldKg: 0, totalRevenuePhp: 0 });
+  const [notifications, setNotifications] = useState<any[]>([]);
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
@@ -117,6 +118,29 @@ export default function Home() {
       }
     };
     if (auth) loadStats();
+  }, [auth]);
+
+  useEffect(() => {
+    const loadNotifications = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const uRaw = localStorage.getItem('user');
+        const u = uRaw ? JSON.parse(uRaw) : null;
+        if (!token || !u?.id) return;
+
+        const headers: any = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+        
+        const notifRes = await fetch(`http://localhost:5001/api/notifications?user_id=${u.id}&limit=5`, { headers });
+        if (notifRes.ok) {
+          const nj = await notifRes.json().catch(() => ({}));
+          const notifs = nj.notifications || [];
+          setNotifications(Array.isArray(notifs) ? notifs : []);
+        }
+      } catch (e) {
+        // swallow errors for notifications
+      }
+    };
+    if (auth) loadNotifications();
   }, [auth]);
 
   const handleSignOut = () => {
@@ -248,27 +272,46 @@ export default function Home() {
             <div className={`${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-100"} rounded-2xl shadow-lg overflow-hidden p-6`}>
               <h3 className={`${isDark ? "text-white" : "text-slate-900"} text-lg font-semibold mb-4`}>Recent Activity</h3>
               <div className="space-y-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <div className="flex-1">
-                    <p className={`${isDark ? "text-white" : "text-slate-900"} text-sm font-medium`}>Field A - Wheat planted</p>
-                    <p className={`${isDark ? "text-slate-400" : "text-slate-500"} text-xs`}>2 hours ago</p>
+                {notifications.length > 0 ? (
+                  notifications.map((notif: any) => {
+                    const getNotifColor = (type: string) => {
+                      if (type === 'harvest') return 'bg-yellow-500';
+                      if (type === 'planted') return 'bg-green-500';
+                      if (type.startsWith('delivery')) return 'bg-blue-500';
+                      if (type === 'field_added') return 'bg-purple-500';
+                      if (type === 'rice_variant_added') return 'bg-orange-500';
+                      return 'bg-gray-500';
+                    };
+
+                    const getTimeAgo = (dateStr: string) => {
+                      const date = new Date(dateStr);
+                      const now = new Date();
+                      const diffMs = now.getTime() - date.getTime();
+                      const diffMins = Math.floor(diffMs / 60000);
+                      const diffHours = Math.floor(diffMins / 60);
+                      const diffDays = Math.floor(diffHours / 24);
+
+                      if (diffMins < 1) return 'Just now';
+                      if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+                      if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+                      return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+                    };
+
+                    return (
+                      <div key={notif.notification_id} className="flex items-center space-x-3">
+                        <div className={`w-2 h-2 ${getNotifColor(notif.type)} rounded-full`}></div>
+                        <div className="flex-1">
+                          <p className={`${isDark ? "text-white" : "text-slate-900"} text-sm font-medium`}>{notif.title}</p>
+                          <p className={`${isDark ? "text-slate-400" : "text-slate-500"} text-xs`}>{getTimeAgo(notif.created_at)}</p>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-4">
+                    <p className={`${isDark ? "text-slate-400" : "text-slate-500"} text-sm`}>No recent activity</p>
                   </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <div className="flex-1">
-                    <p className={`${isDark ? "text-white" : "text-slate-900"} text-sm font-medium`}>Inventory updated</p>
-                    <p className={`${isDark ? "text-slate-400" : "text-slate-500"} text-xs`}>4 hours ago</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                  <div className="flex-1">
-                    <p className={`${isDark ? "text-white" : "text-slate-900"} text-sm font-medium`}>Harvest completed - Field B</p>
-                    <p className={`${isDark ? "text-slate-400" : "text-slate-500"} text-xs`}>1 day ago</p>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>

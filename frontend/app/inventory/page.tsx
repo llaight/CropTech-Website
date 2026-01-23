@@ -256,6 +256,7 @@ export default function InventoryPage() {
                   
                   return {
                     ...item,
+                    price: item.price_per_unit ?? item.price ?? 0,
                     total_sacks_of_grains,
                     total_sacks_of_rice,
                     total_weight_grains_kg,
@@ -571,6 +572,7 @@ export default function InventoryPage() {
           
           return {
             ...item,
+            price: item.price_per_unit ?? item.price ?? 0,
             total_sacks_of_grains,
             total_sacks_of_rice,
             total_weight_grains_kg,
@@ -1208,7 +1210,7 @@ export default function InventoryPage() {
           },
           body: JSON.stringify({
             name: newItem.name,
-            price: newItem.price,
+            price_per_unit: newItem.price,
             sacks_of_grains_25kg: newItem.sacks_of_grains_25kg,
             sacks_of_grains_50kg: newItem.sacks_of_grains_50kg,
             sacks_of_rice_25kg: newItem.sacks_of_rice_25kg,
@@ -1234,7 +1236,7 @@ export default function InventoryPage() {
           backendItem = {
             id: data.id,
             name: newItem.name,
-            price: newItem.price,
+            price: data.item?.price_per_unit ?? data.item?.price ?? newItem.price,
             sacks_of_grains_25kg: newItem.sacks_of_grains_25kg,
             sacks_of_grains_50kg: newItem.sacks_of_grains_50kg,
             sacks_of_rice_25kg: newItem.sacks_of_rice_25kg,
@@ -1916,9 +1918,11 @@ export default function InventoryPage() {
                 <div className="h-full overflow-y-auto p-6">
                   <div className="space-y-4">
                     {inventoryData.length > 0 ? (
-                      inventoryData.map((item) => (
+                      inventoryData.map((item, idx) => {
+                        const inventoryKey = item.id ?? `inventory-${idx}-${item.name}`;
+                        return (
                         <div
-                          key={item.id}
+                          key={inventoryKey}
                           className="group cursor-pointer p-5 rounded-xl border border-slate-200/60 bg-white hover:border-green-300 hover:shadow-md transition-all duration-200"
                           onClick={() => handleInventoryClick(item)}
                         >
@@ -1993,7 +1997,8 @@ export default function InventoryPage() {
                             </div>
                           </div>
                         </div>
-                      ))
+                        );
+                      })
                     ) : (
                       <div className="text-center py-12">
                         <svg className="w-16 h-16 text-slate-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2255,8 +2260,10 @@ export default function InventoryPage() {
                               {upcomingList.length === 0 ? (
                                 <p className="text-sm text-slate-500">No upcoming deliveries.</p>
                               ) : (
-                                upcomingList.map(delivery => (
-                                  <div key={delivery.id} className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                                upcomingList.map((delivery, idx) => {
+                                  const deliveryKey = delivery.id ?? `upcoming-${idx}`;
+                                  return (
+                                  <div key={deliveryKey} className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                                     <div className="flex justify-between items-start mb-2">
                                       <p className="font-semibold text-slate-900">{delivery.recipient}</p>
                                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">#{delivery.id}</span>
@@ -2277,7 +2284,7 @@ export default function InventoryPage() {
                                         const totalKg = it.sacks * it.sack_size_kg;
                                         const subtotal = pricePerKg * totalKg;
                                         return (
-                                          <div key={i} className="flex justify-between text-slate-600">
+                                          <div key={`${deliveryKey}-item-${i}`} className="flex justify-between text-slate-600">
                                             <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
                                             <span className="font-semibold text-blue-600">₱{formatPrice(subtotal)}</span>
                                           </div>
@@ -2315,7 +2322,8 @@ export default function InventoryPage() {
                                       </button>
                                     </div>
                                   </div>
-                                ))
+                                );
+                                })
                               )}
                             </div>
                           )}
@@ -2326,8 +2334,10 @@ export default function InventoryPage() {
                               {pendingList.length === 0 ? (
                                 <p className="text-sm text-slate-500">No pending deliveries.</p>
                               ) : (
-                                pendingList.map(delivery => (
-                                  <div key={delivery.id} className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                                pendingList.map((delivery, idx) => {
+                                  const deliveryKey = delivery.id ?? `pending-${idx}`;
+                                  return (
+                                  <div key={deliveryKey} className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                                     <div className="flex justify-between items-start mb-2">
                                       <p className="font-semibold text-slate-900">{delivery.recipient}</p>
                                       <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">#{delivery.id}</span>
@@ -2348,7 +2358,7 @@ export default function InventoryPage() {
                                         const totalKg = it.sacks * it.sack_size_kg;
                                         const subtotal = pricePerKg * totalKg;
                                         return (
-                                          <div key={i} className="flex justify-between text-slate-600">
+                                          <div key={`${deliveryKey}-item-${i}`} className="flex justify-between text-slate-600">
                                             <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
                                             <span className="font-semibold text-yellow-600">₱{formatPrice(subtotal)}</span>
                                           </div>
@@ -2380,7 +2390,8 @@ export default function InventoryPage() {
                                       </button>
                                     </div>
                                   </div>
-                                ))
+                                );
+                                })
                               )}
                             </div>
                           )}
@@ -2391,8 +2402,10 @@ export default function InventoryPage() {
                               {completedList.length === 0 ? (
                                 <p className="text-sm text-slate-500">No completed deliveries.</p>
                               ) : (
-                                completedList.map(delivery => (
-                                  <div key={delivery.id} className="p-4 bg-green-50 rounded-lg border border-green-200">
+                                completedList.map((delivery, idx) => {
+                                  const deliveryKey = delivery.id ?? `completed-${idx}`;
+                                  return (
+                                  <div key={deliveryKey} className="p-4 bg-green-50 rounded-lg border border-green-200">
                                     <div className="flex justify-between items-start mb-2">
                                       <p className="font-semibold text-slate-900">{delivery.recipient}</p>
                                       <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">#{delivery.id}</span>
@@ -2413,7 +2426,7 @@ export default function InventoryPage() {
                                         const totalKg = it.sacks * it.sack_size_kg;
                                         const subtotal = pricePerKg * totalKg;
                                         return (
-                                          <div key={i} className="flex justify-between text-slate-600">
+                                          <div key={`${deliveryKey}-item-${i}`} className="flex justify-between text-slate-600">
                                             <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
                                             <span className="font-semibold text-green-600">₱{formatPrice(subtotal)}</span>
                                           </div>
@@ -2437,7 +2450,8 @@ export default function InventoryPage() {
                                       Return Order
                                     </button>
                                   </div>
-                                ))
+                                );
+                                })
                               )}
                             </div>
                           )}
@@ -2448,8 +2462,10 @@ export default function InventoryPage() {
                               {cancelledReturnedList.length === 0 ? (
                                 <p className="text-sm text-slate-500">No returned or cancelled deliveries.</p>
                               ) : (
-                                cancelledReturnedList.map((delivery: DeliveryRecord) => (
-                                  <div key={delivery.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                                cancelledReturnedList.map((delivery: DeliveryRecord, idx) => {
+                                  const deliveryKey = delivery.id ?? `cancelled-${idx}`;
+                                  return (
+                                  <div key={deliveryKey} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
                                     <div className="flex justify-between items-start mb-2">
                                       <p className="font-semibold text-slate-900">{delivery.recipient}</p>
                                       <span className={`text-xs px-2 py-1 rounded ${delivery.status === 'returned' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
@@ -2471,7 +2487,7 @@ export default function InventoryPage() {
                                         const totalKg = it.sacks * it.sack_size_kg;
                                         const subtotal = pricePerKg * totalKg;
                                         return (
-                                          <div key={i} className="flex justify-between text-slate-600">
+                                          <div key={`${deliveryKey}-item-${i}`} className="flex justify-between text-slate-600">
                                             <span>{it.variety} - {it.sacks}×{it.sack_size_kg}kg</span>
                                             <span className="font-semibold text-slate-600">₱{formatPrice(subtotal)}</span>
                                           </div>
@@ -2489,7 +2505,8 @@ export default function InventoryPage() {
                                       <span className="font-bold text-slate-700">₱{formatPrice(delivery.total_revenue_php)}</span>
                                     </div>
                                   </div>
-                                ))
+                                );
+                                })
                               )}
                             </div>
                           )}
@@ -3294,7 +3311,7 @@ export default function InventoryPage() {
                   <label className="block text-sm font-medium text-slate-700 mb-4">Delivery Items *</label>
                   
                   {newDelivery.items.map((item, idx) => (
-                    <div key={idx} className="mb-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <div key={`delivery-item-${idx}`} className="mb-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-3">
                         <div className="md:col-span-5">
                           <label className="block text-xs font-medium text-slate-600 mb-1">Variety *</label>

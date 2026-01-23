@@ -510,6 +510,36 @@ export default function FieldDetailPage() {
         setIsPlantCropModalOpen(false);
         setPlantCropForm({ cropName: "", plantingDate: "", expectedYield: "", grainSacks50kg: 0, grainSacks25kg: 0 });
         
+        // Create notification for planted crop
+        try {
+          const userRaw = typeof window !== "undefined" ? localStorage.getItem("user") : null;
+          const user = userRaw ? JSON.parse(userRaw) : null;
+          
+          if (user?.id) {
+            const fieldIdNum = parseInt(String(fieldId));
+            const fieldName = field?.name || `Field ${fieldId}`;
+            const notifRes = await fetch(`http://127.0.0.1:5001/api/notifications`, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                user_id: user.id,
+                type: "planted",
+                title: `${cropName} Planted at ${fieldName}`,
+                message: `${cropName} planted at ${fieldName} on ${plantingDate} - ${plantedGrainNum}kg of grain used`,
+                related_id: !isNaN(fieldIdNum) ? fieldIdNum : null,
+              }),
+            });
+            
+            if (notifRes.ok) {
+              console.log("Notification created for planted crop");
+            } else {
+              console.warn("Failed to create notification");
+            }
+          }
+        } catch (err) {
+          console.error("Error creating notification:", err);
+        }
+        
         // Deduct from inventory after successful crop creation
         try {
           console.log(`Deducting ${sacks50kg} × 50kg + ${sacks25kg} × 25kg = ${plantedGrainNum} kg of ${cropName} from inventory...`);

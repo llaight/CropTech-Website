@@ -380,6 +380,21 @@ def create_inventory_item():
     cursor.close()
     conn.close()
     
+    # Create notification for rice variant added
+    try:
+        notif_conn = get_connection()
+        if notif_conn:
+            notif_cursor = notif_conn.cursor()
+            notif_cursor.execute("""
+                INSERT INTO notifications (user_id, type, title, message, related_id, is_read)
+                VALUES (%s, %s, %s, %s, %s, FALSE)
+            """, (user_id, 'rice_variant_added', f'{name} Added to Inventory', f'New rice variety "{name}" has been added to your inventory.', item_id))
+            notif_conn.commit()
+            notif_cursor.close()
+            notif_conn.close()
+    except Exception as e:
+        print(f"Error creating rice variant notification: {e}")
+    
     # Calculate totals for response
     total_sacks_of_grains = sacks_of_grains_25kg + sacks_of_grains_50kg
     total_sacks_of_rice = sacks_of_rice_25kg + sacks_of_rice_50kg
@@ -2128,6 +2143,23 @@ def create_delivery():
     cursor.close()
     conn.close()
     
+    # Create notification for delivery placed
+    try:
+        notif_conn = get_connection()
+        if notif_conn:
+            notif_cursor = notif_conn.cursor()
+            notif_title = 'Delivery Placed'
+            notif_message = f'Delivery to {recipient} has been placed.'
+            notif_cursor.execute("""
+                INSERT INTO notifications (user_id, type, title, message, related_id, is_read)
+                VALUES (%s, %s, %s, %s, %s, FALSE)
+            """, (user_id, 'delivery_placed', notif_title, notif_message, delivery_id))
+            notif_conn.commit()
+            notif_cursor.close()
+            notif_conn.close()
+    except Exception as e:
+        print(f"Error creating delivery notification: {e}")
+    
     return jsonify({
         "message": "Delivery created successfully",
         "delivery_id": delivery_id
@@ -2254,8 +2286,8 @@ def update_delivery(delivery_id):
 
     cursor = conn.cursor()
     try:
-        # Check if delivery belongs to user
-        cursor.execute("SELECT user_id FROM delivery WHERE delivery_id = %s", (delivery_id,))
+        # Check if delivery belongs to user and get current status and recipient
+        cursor.execute("SELECT user_id, status, recipient FROM delivery WHERE delivery_id = %s", (delivery_id,))
         row = cursor.fetchone()
         
         if not row:
@@ -2267,6 +2299,11 @@ def update_delivery(delivery_id):
             cursor.close()
             conn.close()
             return jsonify({"message": "Unauthorized"}), 403
+        
+        old_status = row[1]
+        recipient_name = row[2]
+        new_status = data.get("status", old_status)
+        status_changed = old_status != new_status if "status" in data else False
         
         # Update delivery header fields
         updates = []
@@ -2336,6 +2373,41 @@ def update_delivery(delivery_id):
 
     cursor.close()
     conn.close()
+    
+    # Create notification if status changed
+    if status_changed:
+        try:
+            notif_conn = get_connection()
+            if notif_conn:
+                notif_cursor = notif_conn.cursor()
+                
+                # Determine notification type and message based on new status
+                if new_status == 'delivered':
+                    notif_type = 'delivery_confirmed'
+                    notif_title = 'Delivery Completed'
+                    notif_message = f'Delivery to {recipient_name} has been completed.'
+                elif new_status == 'returned':
+                    notif_type = 'delivery_returned'
+                    notif_title = 'Delivery Returned'
+                    notif_message = f'Delivery to {recipient_name} has been returned.'
+                elif new_status == 'cancelled':
+                    notif_type = 'delivery_cancelled'
+                    notif_title = 'Delivery Cancelled'
+                    notif_message = f'Delivery to {recipient_name} has been cancelled.'
+                else:
+                    notif_type = 'delivery_placed'
+                    notif_title = 'Delivery Status Updated'
+                    notif_message = f'Delivery status changed to {new_status}.'
+                
+                notif_cursor.execute("""
+                    INSERT INTO notifications (user_id, type, title, message, related_id, is_read)
+                    VALUES (%s, %s, %s, %s, %s, FALSE)
+                """, (user_id, notif_type, notif_title, notif_message, delivery_id))
+                notif_conn.commit()
+                notif_cursor.close()
+                notif_conn.close()
+        except Exception as e:
+            print(f"Error creating delivery status notification: {e}")
     
     return jsonify({"message": "Delivery updated successfully"}), 200
 
@@ -2795,3 +2867,265 @@ def reset_password():
     conn.close()
     
     return jsonify({"message": "Password has been reset successfully. You can now sign in."}), 200
+
+
+# ============================================
+# NOTIFICATION ENDPOINTS
+# ============================================
+
+@bp.route("/notifications", methods=["GET"])
+def get_notifications():
+    """
+    Retrieve notifications for a user
+    Query params: user_id (required), limit (optional, default 50), is_read (optional filter)
+    """
+    user_id = request.args.get("user_id")
+    limit = request.args.get("limit", 50)
+    is_read = request.args.get("is_read")
+    
+    if not user_id:
+        return jsonify({"message": "user_id is required"}), 400
+    
+    try:
+        limit = int(limit)
+    except:
+        limit = 50
+    
+    conn = get_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        # Build query based on filters
+        query = """
+            SELECT notification_id, user_id, type, title, message, related_id, is_read, created_at
+            FROM notifications
+            WHERE user_id = %s
+        """
+        params = [user_id]
+        
+        if is_read is not None:
+            query += " AND is_read = %s"
+            params.append(is_read.lower() == 'true')
+        
+        query += " ORDER BY created_at DESC LIMIT %s"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        notifications = []
+        for row in rows:
+            notifications.append({
+                "notification_id": row[0],
+                "user_id": row[1],
+                "type": row[2],
+                "title": row[3],
+                "message": row[4],
+                "related_id": row[5],
+                "is_read": row[6],
+                "created_at": row[7].isoformat() if row[7] else None
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"notifications": notifications}), 200
+        
+    except Exception as e:
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error fetching notifications", "error": str(e)}), 500
+
+
+@bp.route("/notifications", methods=["POST"])
+def create_notification():
+    """
+    Create a new notification
+    Body: user_id, type, title, message, related_id (optional)
+    """
+    data = request.get_json()
+    
+    user_id = data.get("user_id")
+    notif_type = data.get("type")
+    title = data.get("title")
+    message = data.get("message")
+    related_id = data.get("related_id")
+    
+    if not all([user_id, notif_type, title, message]):
+        return jsonify({"message": "user_id, type, title, and message are required"}), 400
+    
+    # Validate notification type
+    valid_types = ['harvest', 'planted', 'delivery_placed', 'delivery_confirmed', 
+                   'delivery_returned', 'delivery_cancelled', 'field_added', 'rice_variant_added']
+    if notif_type not in valid_types:
+        return jsonify({"message": f"Invalid notification type. Must be one of: {', '.join(valid_types)}"}), 400
+    
+    conn = get_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO notifications (user_id, type, title, message, related_id, is_read)
+            VALUES (%s, %s, %s, %s, %s, FALSE)
+            RETURNING notification_id, user_id, type, title, message, related_id, is_read, created_at
+        """, (user_id, notif_type, title, message, related_id))
+        
+        row = cursor.fetchone()
+        conn.commit()
+        
+        notification = {
+            "notification_id": row[0],
+            "user_id": row[1],
+            "type": row[2],
+            "title": row[3],
+            "message": row[4],
+            "related_id": row[5],
+            "is_read": row[6],
+            "created_at": row[7].isoformat() if row[7] else None
+        }
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"notification": notification}), 201
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error creating notification", "error": str(e)}), 500
+
+
+@bp.route("/notifications/<int:notification_id>", methods=["PATCH"])
+def update_notification(notification_id):
+    """
+    Update a notification (typically to mark as read)
+    Body: is_read (boolean)
+    """
+    data = request.get_json()
+    is_read = data.get("is_read")
+    
+    if is_read is None:
+        return jsonify({"message": "is_read is required"}), 400
+    
+    conn = get_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = %s
+            WHERE notification_id = %s
+            RETURNING notification_id, user_id, type, title, message, related_id, is_read, created_at
+        """, (is_read, notification_id))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Notification not found"}), 404
+        
+        conn.commit()
+        
+        notification = {
+            "notification_id": row[0],
+            "user_id": row[1],
+            "type": row[2],
+            "title": row[3],
+            "message": row[4],
+            "related_id": row[5],
+            "is_read": row[6],
+            "created_at": row[7].isoformat() if row[7] else None
+        }
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"notification": notification}), 200
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error updating notification", "error": str(e)}), 500
+
+
+@bp.route("/notifications/<int:notification_id>", methods=["DELETE"])
+def delete_notification(notification_id):
+    """
+    Delete a notification
+    """
+    conn = get_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("DELETE FROM notifications WHERE notification_id = %s", (notification_id,))
+        
+        if cursor.rowcount == 0:
+            cursor.close()
+            conn.close()
+            return jsonify({"message": "Notification not found"}), 404
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"message": "Notification deleted successfully"}), 200
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error deleting notification", "error": str(e)}), 500
+
+
+@bp.route("/notifications/mark-all-read", methods=["POST"])
+def mark_all_notifications_read():
+    """
+    Mark all notifications as read for a user
+    Body: user_id
+    """
+    data = request.get_json()
+    user_id = data.get("user_id")
+    
+    if not user_id:
+        return jsonify({"message": "user_id is required"}), 400
+    
+    conn = get_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+    
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = TRUE
+            WHERE user_id = %s AND is_read = FALSE
+        """, (user_id,))
+        
+        updated_count = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"message": f"Marked {updated_count} notifications as read"}), 200
+        
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return jsonify({"message": "Error marking notifications as read", "error": str(e)}), 500

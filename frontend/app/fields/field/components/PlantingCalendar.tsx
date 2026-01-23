@@ -662,6 +662,38 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
 
       console.log("Harvest recorded successfully");
 
+      // Create notification for harvest
+      try {
+        const userRaw = typeof window !== "undefined" ? localStorage.getItem("user") : null;
+        const user = userRaw ? JSON.parse(userRaw) : null;
+        
+        if (user?.id && cropData.crops[0]) {
+          const cropName = cropData.crops[0].name || "Crop";
+          const yieldKg = actualYieldKg ? parseFloat(actualYieldKg) : 0;
+          const fieldIdNum = parseInt(String(fieldId));
+          
+          const notifRes = await fetch(`http://127.0.0.1:5001/api/notifications`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              user_id: user.id,
+              type: "harvest",
+              title: `${cropName} Harvested - ${yieldKg}kg`,
+              message: `${cropName} harvested from Field ${fieldId} on ${harvestFormDate} with a yield of ${yieldKg}kg`,
+              related_id: !isNaN(fieldIdNum) ? fieldIdNum : null,
+            }),
+          });
+          
+          if (notifRes.ok) {
+            console.log("Notification created for harvest");
+          } else {
+            console.warn("Failed to create harvest notification");
+          }
+        }
+      } catch (err) {
+        console.error("Error creating harvest notification:", err);
+      }
+
       // Update field status to "available" after harvest
       const updateFieldRes = await fetch(`http://127.0.0.1:5001/api/fields/${fieldId}`, {
         method: "PATCH",

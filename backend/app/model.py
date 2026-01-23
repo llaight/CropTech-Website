@@ -326,6 +326,29 @@ def create_tables():
     cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS used BOOLEAN DEFAULT FALSE;")
     cursor.execute("ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
     
+    # notifications table - stores various system notifications
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notifications(
+                   notification_id SERIAL PRIMARY KEY,
+                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                   type TEXT NOT NULL CHECK (type IN ('harvest', 'planted', 'delivery_placed', 'delivery_confirmed', 'delivery_returned', 'delivery_cancelled', 'field_added', 'rice_variant_added')),
+                   title TEXT NOT NULL,
+                   message TEXT NOT NULL,
+                   related_id INTEGER,
+                   is_read BOOLEAN DEFAULT FALSE,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )
+            """)
+    
+    # Add columns for existing deployments
+    cursor.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id INTEGER;")
+    cursor.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type TEXT;")
+    cursor.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title TEXT;")
+    cursor.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS message TEXT;")
+    cursor.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_id INTEGER;")
+    cursor.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;")
+    cursor.execute("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+    
     conn.commit()
     cursor.close()
     conn.close()
