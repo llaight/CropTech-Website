@@ -428,7 +428,7 @@ export default function InventoryPage() {
     }
   };
 
-  // FIXED: Process deliveries for inventory updates
+  // FIXED: Process deliveries for inventory updates - MODIFIED: Now deducts when status is "to be delivered"
   const processDeliveriesForInventory = () => {
     console.log("Processing deliveries for inventory...");
     console.log("Current processed deliveries:", processedDeliveries);
@@ -440,9 +440,10 @@ export default function InventoryPage() {
     deliveries.forEach(delivery => {
       console.log(`Checking delivery ${delivery.id}: status=${delivery.status}, processed=${processedDeliveries.has(delivery.id)}`);
       
-      if (delivery.status === 'delivered' && !processedDeliveries.has(delivery.id)) {
-        // Process new delivered orders
-        console.log(`Processing delivered order ${delivery.id}`);
+      // MODIFICATION 3: Deduct when status is "to be delivered" instead of "delivered"
+      if ((delivery.status === 'to be delivered' || delivery.status === 'delivered') && !processedDeliveries.has(delivery.id)) {
+        // Process new "to be delivered" orders
+        console.log(`Processing ${delivery.status} order ${delivery.id}`);
         delivery.items.forEach(item => {
           const inventoryItemIndex = updatedInventory.findIndex(inv => inv.name === item.variety);
           if (inventoryItemIndex !== -1) {
@@ -845,18 +846,9 @@ export default function InventoryPage() {
       
       // Handle inventory adjustments based on status change
       if (oldStatus !== newStatus) {
-        if (newStatus === 'delivered' && oldStatus !== 'delivered') {
-          // Deduct inventory
-          console.log(`Marking delivery ${deliveryId} as delivered - deducting inventory`);
-          processDeliveryCompletion(delivery);
-          
-          // Add to processed deliveries
-          const newProcessed = new Set(processedDeliveries);
-          newProcessed.add(deliveryId);
-          setProcessedDeliveries(newProcessed);
-          saveProcessedDeliveries(newProcessed);
-        } else if ((newStatus === 'returned' || newStatus === 'cancelled') && oldStatus === 'delivered') {
-          // Return inventory (add back)
+        // MODIFICATION 3: Already deducted when "to be delivered", so only need to handle returns/cancellations
+        if ((newStatus === 'returned' || newStatus === 'cancelled') && oldStatus !== 'returned' && oldStatus !== 'cancelled') {
+          // Return inventory (add back) when changing from to be delivered/delivered to returned/cancelled
           console.log(`Marking delivery ${deliveryId} as ${newStatus} - returning inventory`);
           processDeliveryCompletion(delivery, true);
           
@@ -865,9 +857,9 @@ export default function InventoryPage() {
           newProcessed.delete(deliveryId);
           setProcessedDeliveries(newProcessed);
           saveProcessedDeliveries(newProcessed);
-        } else if (newStatus === 'delivered' && (oldStatus === 'returned' || oldStatus === 'cancelled')) {
-          // Deduct inventory again if changing from returned/cancelled to delivered
-          console.log(`Re-marking delivery ${deliveryId} as delivered - deducting inventory again`);
+        } else if ((oldStatus === 'returned' || oldStatus === 'cancelled') && (newStatus === 'to be delivered' || newStatus === 'delivered')) {
+          // Deduct inventory again if changing from returned/cancelled to to be delivered/delivered
+          console.log(`Re-marking delivery ${deliveryId} as ${newStatus} - deducting inventory again`);
           processDeliveryCompletion(delivery);
           
           // Add to processed deliveries
@@ -1111,57 +1103,81 @@ export default function InventoryPage() {
     }
   };
 
-  // Function to complete planting - UPDATED: Now handles both 25kg and 50kg sacks separately
-  const handleCompletePlanting = async () => {
+  // MODIFICATION 1: Function to complete disposal - Now handles both grains and rice disposal
+  const handleCompleteDisposal = async () => {
     if (!selectedInventory) return;
     
-    if (selectedInventory.grains_condition !== 'to plant') {
-      alert("This variety is not marked for planting.");
+    // Check if either grains or rice is marked for disposal
+    const isGrainsToDispose = selectedInventory.grains_condition === 'to dispose';
+    const isRiceToDispose = selectedInventory.rice_condition === 'to dispose';
+    
+    if (!isGrainsToDispose && !isRiceToDispose) {
+      alert("Neither grains nor rice is marked for disposal.");
       return;
     }
     
-    const total25kgPlanting = selectedInventory.grains_to_plant_sacks_25kg;
-    const total50kgPlanting = selectedInventory.grains_to_plant_sacks_50kg;
+    let updatedInventoryItem = { ...selectedInventory };
+    let disposalMessage = "";
     
-    if (total25kgPlanting <= 0 && total50kgPlanting <= 0) {
-      alert("No sacks marked for planting.");
-      return;
+    // Handle grains disposal
+    if (isGrainsToDispose) {
+      const total25kgDisposal = selectedInventory.sacks_of_grains_25kg;
+      const total50kgDisposal = selectedInventory.sacks_of_grains_50kg;
+      
+      if (total25kgDisposal > 0 || total50kgDisposal > 0) {
+        updatedInventoryItem = {
+          ...updatedInventoryItem,
+          sacks_of_grains_25kg: 0,
+          sacks_of_grains_50kg: 0,
+          grains_to_plant_sacks_25kg: 0,
+          grains_to_plant_sacks_50kg: 0,
+          grains_condition: "to store",
+        };
+        
+        disposalMessage += `Disposed ${total25kgDisposal}×25kg + ${total50kgDisposal}×50kg grains. `;
+      }
     }
     
-    // Check if enough sacks available for planting
-    if (total25kgPlanting > selectedInventory.sacks_of_grains_25kg) {
-      alert(`Cannot plant ${total25kgPlanting} sacks of 25kg. Only ${selectedInventory.sacks_of_grains_25kg} sacks available.`);
-      return;
+    // Handle rice disposal
+    if (isRiceToDispose) {
+      const total25kgDisposal = selectedInventory.sacks_of_rice_25kg;
+      const total50kgDisposal = selectedInventory.sacks_of_rice_50kg;
+      
+      if (total25kgDisposal > 0 || total50kgDisposal > 0) {
+        updatedInventoryItem = {
+          ...updatedInventoryItem,
+          sacks_of_rice_25kg: 0,
+          sacks_of_rice_50kg: 0,
+          rice_condition: "to store",
+        };
+        
+        disposalMessage += `Disposed ${total25kgDisposal}×25kg + ${total50kgDisposal}×50kg rice. `;
+      }
     }
     
-    if (total50kgPlanting > selectedInventory.sacks_of_grains_50kg) {
-      alert(`Cannot plant ${total50kgPlanting} sacks of 50kg. Only ${selectedInventory.sacks_of_grains_50kg} sacks available.`);
-      return;
-    }
-    
-    const new25kg = selectedInventory.sacks_of_grains_25kg - total25kgPlanting;
-    const new50kg = selectedInventory.sacks_of_grains_50kg - total50kgPlanting;
-    
+    // Update inventory
     const updatedInventory = inventoryData.map(item => 
       item.id === selectedInventory.id 
         ? {
             ...item,
-            sacks_of_grains_25kg: new25kg,
-            sacks_of_grains_50kg: new50kg,
-            total_sacks_of_grains: new25kg + new50kg,
-            total_weight_grains_kg: (new25kg * 25) + (new50kg * 50),
-            grains_to_plant_sacks_25kg: 0,
-            grains_to_plant_sacks_50kg: 0,
-            grains_condition: "to store",
-            grains_display_condition: "to store"
+            ...updatedInventoryItem,
+            total_sacks_of_grains: updatedInventoryItem.sacks_of_grains_25kg + updatedInventoryItem.sacks_of_grains_50kg,
+            total_weight_grains_kg: (updatedInventoryItem.sacks_of_grains_25kg * 25) + (updatedInventoryItem.sacks_of_grains_50kg * 50),
+            total_sacks_of_rice: updatedInventoryItem.sacks_of_rice_25kg + updatedInventoryItem.sacks_of_rice_50kg,
+            total_weight_rice_kg: (updatedInventoryItem.sacks_of_rice_25kg * 25) + (updatedInventoryItem.sacks_of_rice_50kg * 50),
+            grains_display_condition: updatedInventoryItem.grains_condition,
+            rice_display_condition: updatedInventoryItem.rice_condition,
           }
         : item
     );
     
     setInventoryData(updatedInventory);
-    setSelectedInventory(null);
-    setIsModalOpen(false);
-    alert("Planting completed successfully! Grains have been deducted from inventory.");
+    saveToLocalStorage(updatedInventory);
+    
+    // Update selected inventory to reflect changes
+    setSelectedInventory(updatedInventoryItem);
+    
+    alert(disposalMessage || "Disposal completed successfully!");
   };
 
   const handleDeleteInventory = async () => {
@@ -1339,25 +1355,23 @@ export default function InventoryPage() {
         return;
       }
       
-      if (newDelivery.status === 'delivered') {
-        // Check if variety is marked as "to sell" for deliveries
-        if (inventoryItem.rice_condition !== 'to sell') {
-          alert(`Variety "${item.variety}" is not marked for sale. Only varieties marked as "to sell" can be delivered.`);
+      // MODIFICATION 2: Check if enough stock is available for the specific sack size
+      if (item.sack_size_kg === 25) {
+        if (item.sacks > inventoryItem.sacks_of_rice_25kg) {
+          alert(`Not enough 25kg sacks for "${item.variety}". Available: ${inventoryItem.sacks_of_rice_25kg} sacks, Requested: ${item.sacks} sacks.`);
           return;
         }
-        
-        // Check if enough stock is available for the specific sack size
-        if (item.sack_size_kg === 25) {
-          if (item.sacks > inventoryItem.sacks_of_rice_25kg) {
-            alert(`Not enough 25kg sacks for "${item.variety}". Available: ${inventoryItem.sacks_of_rice_25kg} sacks, Requested: ${item.sacks} sacks.`);
-            return;
-          }
-        } else if (item.sack_size_kg === 50) {
-          if (item.sacks > inventoryItem.sacks_of_rice_50kg) {
-            alert(`Not enough 50kg sacks for "${item.variety}". Available: ${inventoryItem.sacks_of_rice_50kg} sacks, Requested: ${item.sacks} sacks.`);
-            return;
-          }
+      } else if (item.sack_size_kg === 50) {
+        if (item.sacks > inventoryItem.sacks_of_rice_50kg) {
+          alert(`Not enough 50kg sacks for "${item.variety}". Available: ${inventoryItem.sacks_of_rice_50kg} sacks, Requested: ${item.sacks} sacks.`);
+          return;
         }
+      }
+      
+      // Check if variety is marked as "to sell" for deliveries
+      if (inventoryItem.rice_condition !== 'to sell') {
+        alert(`Variety "${item.variety}" is not marked for sale. Only varieties marked as "to sell" can be delivered.`);
+        return;
       }
     }
 
@@ -1365,8 +1379,8 @@ export default function InventoryPage() {
     try {
       const success = await saveDeliveryToBackend(newDelivery);
       if (success) {
-        // If delivery is marked as delivered, deduct inventory immediately
-        if (newDelivery.status === 'delivered') {
+        // MODIFICATION 3: Deduct inventory immediately when status is "to be delivered"
+        if (newDelivery.status === 'to be delivered' || newDelivery.status === 'delivered') {
           const totalRevenue = newDelivery.items.reduce((total, item) => {
             const inventoryItem = inventoryData.find(inv => inv.name === item.variety);
             const pricePerKg = inventoryItem?.price || 0;
@@ -1410,44 +1424,29 @@ export default function InventoryPage() {
     }
   };
 
-  const handleSackChange = (
-    type: 'grains_25kg' | 'grains_50kg' | 'rice_25kg' | 'rice_50kg', 
-    delta: number,
-    isEditMode: boolean = false
-  ) => {
-    // Only allow increasing sacks
-    if (delta <= 0) return;
+const handleSackChange = (
+  type: 'grains_25kg' | 'grains_50kg' | 'rice_25kg' | 'rice_50kg', 
+  delta: number,
+  isEditMode: boolean = false
+) => {
+  // Only allow increasing sacks
+  if (delta <= 0) return;
+  
+  if (isEditMode && selectedInventory) {
+    const key = `sacks_of_${type}` as keyof EditableInventoryItem;
+    const currentValue = selectedInventory[key] as number;
     
-    if (isEditMode && selectedInventory) {
-      const key = `sacks_of_${type}` as keyof EditableInventoryItem;
-      const currentValue = selectedInventory[key] as number;
-      
-      // If adding rice sacks, check if there's enough harvest available
-      if ((type === 'rice_25kg' || type === 'rice_50kg') && delta > 0) {
-        const kgToDeduct = delta * (type === 'rice_25kg' ? 25 : 50);
-        
-        // Check if there's enough harvest available
-        if (kgToDeduct > selectedInventory.harvest_to_be_alloted) {
-          alert(`Not enough harvest available! Only ${selectedInventory.harvest_to_be_alloted}kg remaining, but you're trying to add ${kgToDeduct}kg.`);
-          return;
-        }
-        
-        const newHarvest = Math.max(0, selectedInventory.harvest_to_be_alloted - kgToDeduct);
-        
-        setSelectedInventory(prev => prev ? { 
-          ...prev, 
-          [key]: Math.max(0, currentValue + delta),
-          harvest_to_be_alloted: newHarvest
-        } : null);
-      } else {
-        setSelectedInventory(prev => prev ? { ...prev, [key]: Math.max(0, currentValue + delta) } : null);
-      }
-    } else {
-      const key = `sacks_of_${type}` as keyof typeof newItem;
-      const currentValue = newItem[key] as number;
-      setNewItem(prev => ({ ...prev, [key]: Math.max(0, currentValue + delta) }));
-    }
-  };
+    setSelectedInventory(prev => prev ? { 
+      ...prev, 
+      [key]: Math.max(0, currentValue + delta)
+    } : null);
+  } else {
+    const key = `sacks_of_${type}` as keyof typeof newItem;
+    const currentValue = newItem[key] as number;
+    setNewItem(prev => ({ ...prev, [key]: Math.max(0, currentValue + delta) }));
+  }
+};
+
 
   const handleSackInputChange = (
     type: 'grains_25kg' | 'grains_50kg' | 'rice_25kg' | 'rice_50kg', 
@@ -1949,11 +1948,6 @@ export default function InventoryPage() {
                                       {item.total_sacks_of_grains} sacks • {item.total_weight_grains_kg.toLocaleString()} kg
                                     </span>
                                   </div>
-                                  {item.grains_condition === 'to plant' && (item.grains_to_plant_sacks_25kg > 0 || item.grains_to_plant_sacks_50kg > 0) && (
-                                    <div className="mt-1 text-xs text-amber-600 font-medium">
-                                      For planting: {item.grains_to_plant_sacks_25kg}×25kg + {item.grains_to_plant_sacks_50kg}×50kg
-                                    </div>
-                                  )}
                                 </div>
                                 <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
                                   <div className="flex items-center justify-between">
@@ -2069,50 +2063,26 @@ export default function InventoryPage() {
                           <span className="text-slate-600">Condition: </span>
                           <span className="font-medium">{totals.grains_display_condition}</span>
                         </div>
-                        {selectedInventory.grains_condition === 'to plant' && (
-                          <div className="mt-2 p-2 bg-amber-50 rounded border border-amber-200">
-                            <div className="text-slate-600 mb-1">Sacks for planting:</div>
+                        
+                        {/* MODIFICATION 1: Dispose now functionality for grains */}
+                        {selectedInventory.grains_condition === 'to dispose' && (
+                          <div className="mt-2 p-2 bg-red-50 rounded border border-red-200">
+                            <div className="text-slate-600 mb-1">Grains marked for disposal:</div>
                             <div className="grid grid-cols-2 gap-2 mb-2">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs text-slate-600">25kg sacks:</span>
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    value={selectedInventory.grains_to_plant_sacks_25kg}
-                                    onChange={(e) => setSelectedInventory(prev => prev ? { 
-                                      ...prev, 
-                                      grains_to_plant_sacks_25kg: Math.max(0, parseInt(e.target.value) || 0) 
-                                    } : null)}
-                                    className="w-16 px-2 py-1 border border-slate-300 rounded text-center text-sm"
-                                    min="0"
-                                    max={selectedInventory.sacks_of_grains_25kg}
-                                  />
-                                  <span className="text-xs text-slate-500">sacks</span>
-                                </div>
+                                <span className="font-medium">{selectedInventory.sacks_of_grains_25kg}</span>
                               </div>
                               <div className="flex items-center justify-between">
                                 <span className="text-xs text-slate-600">50kg sacks:</span>
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    value={selectedInventory.grains_to_plant_sacks_50kg}
-                                    onChange={(e) => setSelectedInventory(prev => prev ? { 
-                                      ...prev, 
-                                      grains_to_plant_sacks_50kg: Math.max(0, parseInt(e.target.value) || 0) 
-                                    } : null)}
-                                    className="w-16 px-2 py-1 border border-slate-300 rounded text-center text-sm"
-                                    min="0"
-                                    max={selectedInventory.sacks_of_grains_50kg}
-                                  />
-                                  <span className="text-xs text-slate-500">sacks</span>
-                                </div>
+                                <span className="font-medium">{selectedInventory.sacks_of_grains_50kg}</span>
                               </div>
                             </div>
                             <button
-                              onClick={handleCompletePlanting}
-                              className="mt-2 w-full px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm font-medium"
+                              onClick={handleCompleteDisposal}
+                              className="mt-2 w-full px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm font-medium"
                             >
-                              Done Planting!
+                              Dispose Now!
                             </button>
                           </div>
                         )}
@@ -2147,9 +2117,30 @@ export default function InventoryPage() {
                           <span className="text-slate-600">Condition: </span>
                           <span className="font-medium">{totals.rice_display_condition}</span>
                         </div>
-                        <div className="mt-2 text-xs text-slate-500">
-                          Note: Rice inventory is automatically deducted when deliveries are marked as "delivered" and returned when marked as "returned" or "cancelled".
-                        </div>
+                        
+                        {/* MODIFICATION 1: Dispose now functionality for rice */}
+                        {selectedInventory.rice_condition === 'to dispose' && (
+                          <div className="mt-2 p-2 bg-red-50 rounded border border-red-200">
+                            <div className="text-slate-600 mb-1">Rice marked for disposal:</div>
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-600">25kg sacks:</span>
+                                <span className="font-medium">{selectedInventory.sacks_of_rice_25kg}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-slate-600">50kg sacks:</span>
+                                <span className="font-medium">{selectedInventory.sacks_of_rice_50kg}</span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={handleCompleteDisposal}
+                              className="mt-2 w-full px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm font-medium"
+                            >
+                              Dispose Now!
+                            </button>
+                          </div>
+                        )}
+                        
                       </div>
                     </div>
                   </div>
@@ -2742,125 +2733,113 @@ export default function InventoryPage() {
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-slate-900">Rice Inventory</h3>
-                  
-                  {/* Harvest To Be Alloted Display */}
-                  {selectedInventory.harvest_to_be_alloted > 0 && (
-                    <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
-                      <div className="flex items-center gap-2 mb-1">
-                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span className="text-blue-900 font-semibold">Harvest Available to Allot</span>
-                      </div>
-                      <p className="text-2xl font-bold text-blue-700">
-                        {selectedInventory.harvest_to_be_alloted.toLocaleString()} kg
-                      </p>
-                      <p className="text-sm text-blue-600 mt-1">
-                        This amount will be automatically deducted as you add rice sacks below
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
-                            <span className="text-amber-700 font-bold">25</span>
-                          </div>
-                          <span className="text-slate-700 font-medium">25kg Sacks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={selectedInventory.sacks_of_rice_25kg}
-                            onChange={(e) => handleSackInputChange('rice_25kg', e.target.value, true)}
-                            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
-                            min="0"
-                          />
-                          <button
-                            onClick={() => handleSackChange('rice_25kg', 1, true)}
-                            disabled={selectedInventory.harvest_to_be_alloted < 25}
-                            className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold transition ${
-                              selectedInventory.harvest_to_be_alloted < 25
-                                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                                : 'bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 text-slate-700 hover:text-green-700'
-                            }`}
-                            aria-label="Increase 25kg sacks of rice"
-                            title={selectedInventory.harvest_to_be_alloted < 25 ? `Not enough harvest (only ${selectedInventory.harvest_to_be_alloted}kg available)` : ''}
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        Weight: <span className="font-medium">{(selectedInventory.sacks_of_rice_25kg * 25).toLocaleString()} kg</span>
-                      </p>
-                    </div>
+<div className="space-y-4">
+  <h3 className="text-lg font-semibold text-slate-900">Rice Inventory</h3>
+  
+  {/* Harvest To Be Alloted Display */}
+  {selectedInventory.harvest_to_be_alloted > 0 && (
+    <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
+      <div className="flex items-center gap-2 mb-1">
+        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span className="text-blue-900 font-semibold">Harvest Available to Allot</span>
+      </div>
+      <p className="text-2xl font-bold text-blue-700">
+        {selectedInventory.harvest_to_be_alloted.toLocaleString()} kg
+      </p>
+      <p className="text-sm text-blue-600 mt-1">
+        Note: Harvest allocation only applies when adding rice sacks from harvest yield.
+      </p>
+    </div>
+  )}
+  
+  <div className="grid grid-cols-2 gap-4">
+    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+            <span className="text-amber-700 font-bold">25</span>
+          </div>
+          <span className="text-slate-700 font-medium">25kg Sacks</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            value={selectedInventory.sacks_of_rice_25kg}
+            onChange={(e) => handleSackInputChange('rice_25kg', e.target.value, true)}
+            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+            min="0"
+          />
+          <button
+            onClick={() => handleSackChange('rice_25kg', 1, true)}
+            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
+            aria-label="Increase 25kg sacks of rice"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p className="text-sm text-slate-600">
+        Weight: <span className="font-medium">{(selectedInventory.sacks_of_rice_25kg * 25).toLocaleString()} kg</span>
+      </p>
+    </div>
 
-                    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
-                            <span className="text-amber-700 font-bold">50</span>
-                          </div>
-                          <span className="text-slate-700 font-medium">50kg Sacks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={selectedInventory.sacks_of_rice_50kg}
-                            onChange={(e) => handleSackInputChange('rice_50kg', e.target.value, true)}
-                            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
-                            min="0"
-                          />
-                          <button
-                            onClick={() => handleSackChange('rice_50kg', 1, true)}
-                            disabled={selectedInventory.harvest_to_be_alloted < 50}
-                            className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold transition ${
-                              selectedInventory.harvest_to_be_alloted < 50
-                                ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                                : 'bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 text-slate-700 hover:text-green-700'
-                            }`}
-                            title={selectedInventory.harvest_to_be_alloted < 50 ? `Not enough harvest (only ${selectedInventory.harvest_to_be_alloted}kg available)` : ''}
-                            aria-label="Increase 50kg sacks of rice"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        Weight: <span className="font-medium">{(selectedInventory.sacks_of_rice_50kg * 50).toLocaleString()} kg</span>
-                      </p>
-                    </div>
-                  </div>
+    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+            <span className="text-amber-700 font-bold">50</span>
+          </div>
+          <span className="text-slate-700 font-medium">50kg Sacks</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            value={selectedInventory.sacks_of_rice_50kg}
+            onChange={(e) => handleSackInputChange('rice_50kg', e.target.value, true)}
+            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+            min="0"
+          />
+          <button
+            onClick={() => handleSackChange('rice_50kg', 1, true)}
+            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
+            aria-label="Increase 50kg sacks of rice"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p className="text-sm text-slate-600">
+        Weight: <span className="font-medium">{(selectedInventory.sacks_of_rice_50kg * 50).toLocaleString()} kg</span>
+      </p>
+    </div>
+  </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Rice Condition
-                    </label>
-                    <select
-                      value={selectedInventory.rice_condition}
-                      onChange={(e) => setSelectedInventory(prev => prev ? { 
-                        ...prev, 
-                        rice_condition: e.target.value
-                      } : null)}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                    >
-                      {RICE_CONDITION_OPTIONS.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+  <div>
+    <label className="block text-sm font-medium text-slate-700 mb-2">
+      Rice Condition
+    </label>
+    <select
+      value={selectedInventory.rice_condition}
+      onChange={(e) => setSelectedInventory(prev => prev ? { 
+        ...prev, 
+        rice_condition: e.target.value
+      } : null)}
+      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+    >
+      {RICE_CONDITION_OPTIONS.map(option => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </div>
+</div>
 
                 <div className="bg-green-50 rounded-xl p-4 border border-green-200">
                   <h4 className="font-semibold text-green-800 mb-2">Summary</h4>
@@ -3060,92 +3039,92 @@ export default function InventoryPage() {
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-slate-900">Rice Inventory</h3>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
-                            <span className="text-amber-700 font-bold">25</span>
-                          </div>
-                          <span className="text-slate-700 font-medium">25kg Sacks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={newItem.sacks_of_rice_25kg}
-                            onChange={(e) => handleSackInputChange('rice_25kg', e.target.value)}
-                            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
-                            min="0"
-                          />
-                          <button
-                            onClick={() => handleSackChange('rice_25kg', 1)}
-                            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
-                            aria-label="Increase 25kg sacks of rice"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        Weight: <span className="font-medium">{(newItem.sacks_of_rice_25kg * 25).toLocaleString()} kg</span>
-                      </p>
-                    </div>
+  <div className="space-y-4">
+  <h3 className="text-lg font-semibold text-slate-900">Rice Inventory</h3>
+  
+  <div className="grid grid-cols-2 gap-4">
+    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+            <span className="text-amber-700 font-bold">25</span>
+          </div>
+          <span className="text-slate-700 font-medium">25kg Sacks</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            value={newItem.sacks_of_rice_25kg}
+            onChange={(e) => handleSackInputChange('rice_25kg', e.target.value)}
+            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+            min="0"
+          />
+          <button
+            onClick={() => handleSackChange('rice_25kg', 1)}
+            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
+            aria-label="Increase 25kg sacks of rice"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p className="text-sm text-slate-600">
+        Weight: <span className="font-medium">{(newItem.sacks_of_rice_25kg * 25).toLocaleString()} kg</span>
+      </p>
+    </div>
 
-                    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
-                            <span className="text-amber-700 font-bold">50</span>
-                          </div>
-                          <span className="text-slate-700 font-medium">50kg Sacks</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={newItem.sacks_of_rice_50kg}
-                            onChange={(e) => handleSackInputChange('rice_50kg', e.target.value)}
-                            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
-                            min="0"
-                          />
-                          <button
-                            onClick={() => handleSackChange('rice_50kg', 1)}
-                            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
-                            aria-label="Increase 50kg sacks of rice"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        Weight: <span className="font-medium">{(newItem.sacks_of_rice_50kg * 50).toLocaleString()} kg</span>
-                      </p>
-                    </div>
-                  </div>
+    <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
+            <span className="text-amber-700 font-bold">50</span>
+          </div>
+          <span className="text-slate-700 font-medium">50kg Sacks</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            value={newItem.sacks_of_rice_50kg}
+            onChange={(e) => handleSackInputChange('rice_50kg', e.target.value)}
+            className="font-bold text-lg w-20 text-center text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
+            min="0"
+          />
+          <button
+            onClick={() => handleSackChange('rice_50kg', 1)}
+            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-300 hover:border-green-500 hover:bg-green-50 rounded-lg font-bold text-slate-700 hover:text-green-700 transition"
+            aria-label="Increase 50kg sacks of rice"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p className="text-sm text-slate-600">
+        Weight: <span className="font-medium">{(newItem.sacks_of_rice_50kg * 50).toLocaleString()} kg</span>
+      </p>
+    </div>
+  </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Rice Condition
-                    </label>
-                    <select
-                      value={newItem.rice_condition}
-                      onChange={(e) => setNewItem(prev => ({ ...prev, rice_condition: e.target.value }))}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                    >
-                      {RICE_CONDITION_OPTIONS.map(option => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+  <div>
+    <label className="block text-sm font-medium text-slate-700 mb-2">
+      Rice Condition
+    </label>
+    <select
+      value={newItem.rice_condition}
+      onChange={(e) => setNewItem(prev => ({ ...prev, rice_condition: e.target.value }))}
+      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+    >
+      {RICE_CONDITION_OPTIONS.map(option => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </div>
+</div>
 
                 <div className="bg-green-50 rounded-xl p-4 border border-green-200">
                   <h4 className="font-semibold text-green-800 mb-2">Summary</h4>
@@ -3325,9 +3304,11 @@ export default function InventoryPage() {
                           >
                             <option value="">Select variety</option>
                             {inventoryData
-                              .filter(inv => inv.rice_condition === 'to sell' || newDelivery.status !== 'delivered')
+                              .filter(inv => inv.rice_condition === 'to sell')
                               .map(v => (
-                                <option key={v.id} value={v.name}>{v.name} (Available: {v.sacks_of_rice_25kg}×25kg + {v.sacks_of_rice_50kg}×50kg)</option>
+                                <option key={v.id} value={v.name}>
+                                  {v.name} (Available: {v.sacks_of_rice_25kg}×25kg + {v.sacks_of_rice_50kg}×50kg)
+                                </option>
                               ))}
                           </select>
                         </div>
@@ -3352,11 +3333,38 @@ export default function InventoryPage() {
                           <input
                             type="number"
                             min={1}
+                            max={
+                              item.variety && item.sack_size_kg
+                                ? (() => {
+                                    const inventoryItem = inventoryData.find(inv => inv.name === item.variety);
+                                    if (!inventoryItem) return 0;
+                                    return item.sack_size_kg === 25 
+                                      ? inventoryItem.sacks_of_rice_25kg 
+                                      : inventoryItem.sacks_of_rice_50kg;
+                                  })()
+                                : 0
+                            }
                             value={item.sacks}
-                            onChange={(e) => setNewDelivery(prev => ({
-                              ...prev,
-                              items: prev.items.map((row, i) => i === idx ? { ...row, sacks: Math.max(1, parseInt(e.target.value) || 1) } : row)
-                            }))}
+                            onChange={(e) => {
+                              const newValue = parseInt(e.target.value) || 0;
+                              const maxSacks = item.variety && item.sack_size_kg
+                                ? (() => {
+                                    const inventoryItem = inventoryData.find(inv => inv.name === item.variety);
+                                    if (!inventoryItem) return 0;
+                                    return item.sack_size_kg === 25 
+                                      ? inventoryItem.sacks_of_rice_25kg 
+                                      : inventoryItem.sacks_of_rice_50kg;
+                                  })()
+                                : 0;
+                              
+                              // MODIFICATION 2: Enforce max limit based on available stock
+                              const clampedValue = Math.max(1, Math.min(newValue, maxSacks));
+                              
+                              setNewDelivery(prev => ({
+                                ...prev,
+                                items: prev.items.map((row, i) => i === idx ? { ...row, sacks: clampedValue } : row)
+                              }));
+                            }}
                             className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                             placeholder="1"
                           />
@@ -3381,6 +3389,19 @@ export default function InventoryPage() {
                       </div>
                       <div className="text-xs text-slate-600">
                         Quantity: <span className="font-semibold">{item.sacks * item.sack_size_kg} kg</span>
+                        {item.variety && item.sack_size_kg && (
+                          <span className="ml-2 text-blue-600">
+                            (Max: {
+                              (() => {
+                                const inventoryItem = inventoryData.find(inv => inv.name === item.variety);
+                                if (!inventoryItem) return 'N/A';
+                                return item.sack_size_kg === 25 
+                                  ? `${inventoryItem.sacks_of_rice_25kg} sacks`
+                                  : `${inventoryItem.sacks_of_rice_50kg} sacks`;
+                              })()
+                            })
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}

@@ -2135,6 +2135,36 @@ def create_delivery():
 
     cursor = conn.cursor()
     try:
+        # MODIFICATION 3: Check stock availability before creating delivery
+        for item in items:
+            variety = item.get("variety")
+            sack_size = item.get("sack_size_kg", 50)
+            sacks = item.get("sacks", 0)
+            
+            # Check if variety exists and has enough stock
+            if sack_size == 25:
+                cursor.execute("""
+                    SELECT sacks_of_rice_25kg FROM inventory 
+                    WHERE user_id = %s AND name = %s AND rice_condition = 'to sell'
+                """, (user_id, variety))
+            else:  # 50kg
+                cursor.execute("""
+                    SELECT sacks_of_rice_50kg FROM inventory 
+                    WHERE user_id = %s AND name = %s AND rice_condition = 'to sell'
+                """, (user_id, variety))
+            
+            stock_row = cursor.fetchone()
+            if not stock_row:
+                return jsonify({
+                    "message": f"Variety '{variety}' not found or not marked for sale"
+                }), 400
+            
+            available_stock = stock_row[0] or 0
+            if sacks > available_stock:
+                return jsonify({
+                    "message": f"Insufficient stock for '{variety}'. Available: {available_stock} sacks of {sack_size}kg, Requested: {sacks}"
+                }), 400
+        
         # Calculate total revenue from inventory prices
         total_revenue = calculate_delivery_revenue(user_id, items, conn)
         
@@ -2158,6 +2188,26 @@ def create_delivery():
                 INSERT INTO delivery_item (delivery_id, variety, sack_size_kg, sacks)
                 VALUES (%s, %s, %s, %s);
             """, (delivery_id, item.get("variety"), item.get("sack_size_kg"), item.get("sacks")))
+        
+        # MODIFICATION 3: Deduct inventory if status is "to be delivered" or "delivered"
+        if status in ['to be delivered', 'delivered']:
+            for item in items:
+                variety = item.get("variety")
+                sack_size = item.get("sack_size_kg", 50)
+                sacks = item.get("sacks", 0)
+                
+                if sack_size == 25:
+                    cursor.execute("""
+                        UPDATE inventory 
+                        SET sacks_of_rice_25kg = sacks_of_rice_25kg - %s
+                        WHERE user_id = %s AND name = %s
+                    """, (sacks, user_id, variety))
+                else:  # 50kg
+                    cursor.execute("""
+                        UPDATE inventory 
+                        SET sacks_of_rice_50kg = sacks_of_rice_50kg - %s
+                        WHERE user_id = %s AND name = %s
+                    """, (sacks, user_id, variety))
         
         conn.commit()
         
@@ -2331,6 +2381,83 @@ def update_delivery(delivery_id):
         recipient_name = row[2]
         new_status = data.get("status", old_status)
         status_changed = old_status != new_status if "status" in data else False
+        
+        # MODIFICATION 3: Handle inventory adjustments when status changes
+        if status_changed:
+            # Get delivery items
+            cursor.execute("""
+                SELECT variety, sack_size_kg, sacks 
+                FROM delivery_item 
+                WHERE delivery_id = %s
+            """, (delivery_id,))
+            delivery_items = cursor.fetchall()
+            
+            # If changing from to be delivered/delivered to returned/cancelled, return stock
+            if old_status in ['to be delivered', 'delivered'] and new_status in ['returned', 'cancelled']:
+                for item in delivery_items:
+                    variety, sack_size_kg, sacks = item
+                    if sack_size_kg == 25:
+                        cursor.execute("""
+                            UPDATE inventory 
+                            SET sacks_of_rice_25kg = sacks_of_rice_25kg + %s
+                            WHERE user_id = %s AND name = %s
+                        """, (sacks, user_id, variety))
+                    else:  # 50kg
+                        cursor.execute("""
+                            UPDATE inventory 
+                            SET sacks_of_rice_50kg = sacks_of_rice_50kg + %s
+                            WHERE user_id = %s AND name = %s
+                        """, (sacks, user_id, variety))
+            
+            # If changing from returned/cancelled to to be delivered/delivered, deduct stock
+            elif old_status in ['returned', 'cancelled'] and new_status in ['to be delivered', 'delivered']:
+                # First check if enough stock is available
+                for item in delivery_items:
+                    variety, sack_size_kg, sacks = item
+                    if sack_size_kg == 25:
+                        cursor.execute("""
+                            SELECT sacks_of_rice_25kg FROM inventory 
+                            WHERE user_id = %s AND name = %s
+                        """, (user_id, variety))
+                    else:  # 50kg
+                        cursor.execute("""
+                            SELECT sacks_of_rice_50kg FROM inventory 
+                            WHERE user_id = %s AND name = %s
+                        """, (user_id, variety))
+                    
+                    stock_row = cursor.fetchone()
+                    if not stock_row:
+                        conn.rollback()
+                        cursor.close()
+                        conn.close()
+                        return jsonify({
+                            "message": f"Variety '{variety}' not found in inventory"
+                        }), 400
+                    
+                    available_stock = stock_row[0] or 0
+                    if sacks > available_stock:
+                        conn.rollback()
+                        cursor.close()
+                        conn.close()
+                        return jsonify({
+                            "message": f"Insufficient stock for '{variety}'. Available: {available_stock} sacks of {sack_size_kg}kg, Requested: {sacks}"
+                        }), 400
+                
+                # Deduct stock
+                for item in delivery_items:
+                    variety, sack_size_kg, sacks = item
+                    if sack_size_kg == 25:
+                        cursor.execute("""
+                            UPDATE inventory 
+                            SET sacks_of_rice_25kg = sacks_of_rice_25kg - %s
+                            WHERE user_id = %s AND name = %s
+                        """, (sacks, user_id, variety))
+                    else:  # 50kg
+                        cursor.execute("""
+                            UPDATE inventory 
+                            SET sacks_of_rice_50kg = sacks_of_rice_50kg - %s
+                            WHERE user_id = %s AND name = %s
+                        """, (sacks, user_id, variety))
         
         # Update delivery header fields
         updates = []
