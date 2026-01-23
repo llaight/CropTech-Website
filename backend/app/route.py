@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 import os
+import json
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 from .model import get_connection, create_tables
@@ -1526,6 +1527,7 @@ def harvest_crop(crop_id: int):
     actual_harvest_date = data.get("actual_harvest_date")
     actual_yield_kg = data.get("actual_yield_kg")
     notes = data.get("notes")
+    calendar_events = data.get("calendar_events")
 
     # Require auth token
     auth = request.headers.get("Authorization")
@@ -1586,9 +1588,9 @@ def harvest_crop(crop_id: int):
             """
             INSERT INTO crop_harvest_history (
                 crop_id, field_id, user_id, crop_name, planting_date, expected_harvest_date,
-                actual_harvest_date, expected_yield_kg, actual_yield_kg, notes
+                actual_harvest_date, expected_yield_kg, actual_yield_kg, notes, calendar_events
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING harvest_id, created_at;
             """,
             (
@@ -1602,6 +1604,7 @@ def harvest_crop(crop_id: int):
                 expected_yield,
                 final_actual_yield,
                 final_notes,
+                json.dumps(calendar_events) if calendar_events is not None else None,
             ),
         )
         hist_row = cursor.fetchone()
@@ -1668,6 +1671,7 @@ def harvest_crop(crop_id: int):
             "expected_yield_kg": expected_yield,
             "actual_yield_kg": final_actual_yield,
             "notes": final_notes,
+            "calendar_events": calendar_events,
             "created_at": hist_row[1].isoformat() if hist_row and hist_row[1] else None,
         }
 
@@ -1719,9 +1723,9 @@ def get_harvest_history():
     try:
         cursor.execute(
             """
-            SELECT harvest_id, crop_id, field_id, user_id, crop_name, planting_date,
-                   expected_harvest_date, actual_harvest_date, expected_yield_kg,
-                   actual_yield_kg, notes, created_at
+                 SELECT harvest_id, crop_id, field_id, user_id, crop_name, planting_date,
+                     expected_harvest_date, actual_harvest_date, expected_yield_kg,
+                     actual_yield_kg, notes, calendar_events, created_at
             FROM crop_harvest_history
             WHERE user_id = %s
             ORDER BY created_at DESC;
@@ -1744,8 +1748,19 @@ def get_harvest_history():
                 expected_yield,
                 actual_yield,
                 notes,
+                calendar_events,
                 created_at,
             ) = row
+
+            events_payload = None
+            try:
+                # psycopg returns dict for jsonb; fall back to decode string payloads
+                if isinstance(calendar_events, str):
+                    events_payload = json.loads(calendar_events)
+                else:
+                    events_payload = calendar_events
+            except Exception:
+                events_payload = None
 
             harvest_records.append({
                 "harvest_id": hid,
@@ -1759,6 +1774,7 @@ def get_harvest_history():
                 "expected_yield_kg": expected_yield,
                 "actual_yield_kg": actual_yield,
                 "notes": notes,
+                "calendar_events": events_payload,
                 "created_at": created_at.isoformat() if created_at else None,
             })
 
@@ -1805,9 +1821,9 @@ def get_field_harvest_history(field_id: int):
 
         cursor.execute(
             f"""
-            SELECT harvest_id, crop_id, field_id, user_id, crop_name, planting_date,
-                   expected_harvest_date, actual_harvest_date, expected_yield_kg,
-                   actual_yield_kg, notes, created_at
+                 SELECT harvest_id, crop_id, field_id, user_id, crop_name, planting_date,
+                     expected_harvest_date, actual_harvest_date, expected_yield_kg,
+                     actual_yield_kg, notes, calendar_events, created_at
             FROM crop_harvest_history
             WHERE {where_clause}
             ORDER BY created_at DESC;
@@ -1830,8 +1846,18 @@ def get_field_harvest_history(field_id: int):
                 expected_yield,
                 actual_yield,
                 notes,
+                calendar_events,
                 created_at,
             ) = row
+
+            events_payload = None
+            try:
+                if isinstance(calendar_events, str):
+                    events_payload = json.loads(calendar_events)
+                else:
+                    events_payload = calendar_events
+            except Exception:
+                events_payload = None
 
             history.append({
                 "id": hid,
@@ -1845,6 +1871,7 @@ def get_field_harvest_history(field_id: int):
                 "expected_yield_kg": expected_yield if expected_yield is not None else 0,
                 "actual_yield_kg": actual_yield if actual_yield is not None else 0,
                 "notes": notes,
+                "calendar_events": events_payload,
                 "created_at": created_at.isoformat() if created_at else None,
             })
 

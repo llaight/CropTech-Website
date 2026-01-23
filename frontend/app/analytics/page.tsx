@@ -138,8 +138,87 @@ export default function AnalyticsPage() {
   const [yieldTrendsData, setYieldTrendsData] = useState<Array<{ period: string; yield: number; revenue: number }>>([]);
   const [allDeliveries, setAllDeliveries] = useState<any[]>([]);
   const [allHarvestHistory, setAllHarvestHistory] = useState<any[]>([]);
+  const [topByRegion, setTopByRegion] = useState<any[]>([]);
+  const [topBySeason, setTopBySeason] = useState<any[]>([]);
 
   const isDark = theme === "dark";
+
+  // Region mapping function
+  const getRegionFromLocation = (location: string): string => {
+    const loc = location.toLowerCase();
+    
+    // NCR
+    if (loc.includes('manila') || loc.includes('quezon city')) return 'NCR';
+    
+    // CAR
+    if (loc.includes('abra') || loc.includes('apayao') || loc.includes('benguet') || 
+        loc.includes('ifugao') || loc.includes('kalinga') || loc.includes('mountain province')) return 'CAR';
+    
+    // Region I (Ilocos)
+    if (loc.includes('ilocos norte') || loc.includes('ilocos sur') || 
+        loc.includes('la union') || loc.includes('pangasinan')) return 'Region I (Ilocos)';
+    
+    // Region II (Cagayan Valley)
+    if (loc.includes('batanes') || loc.includes('cagayan') || loc.includes('isabela') || 
+        loc.includes('nueva vizcaya') || loc.includes('quirino')) return 'Region II (Cagayan Valley)';
+    
+    // Region III (Central Luzon)
+    if (loc.includes('aurora') || loc.includes('bataan') || loc.includes('bulacan') || 
+        loc.includes('nueva ecija') || loc.includes('pampanga') || loc.includes('tarlac') || 
+        loc.includes('zambales') || loc.includes('central luzon')) return 'Region III (Central Luzon)';
+    
+    // Region IV-A (CALABARZON)
+    if (loc.includes('batangas') || loc.includes('cavite') || loc.includes('laguna') || 
+        loc.includes('quezon') || loc.includes('rizal')) return 'Region IV-A (CALABARZON)';
+    
+    // Region IV-B (MIMAROPA)
+    if (loc.includes('marinduque') || loc.includes('occidental mindoro') || 
+        loc.includes('oriental mindoro') || loc.includes('palawan') || loc.includes('romblon')) return 'Region IV-B (MIMAROPA)';
+    
+    // Region V (Bicol)
+    if (loc.includes('albay') || loc.includes('camarines norte') || loc.includes('camarines sur') || 
+        loc.includes('catanduanes') || loc.includes('masbate') || loc.includes('sorsogon')) return 'Region V (Bicol)';
+    
+    // Region VI (Western Visayas)
+    if (loc.includes('aklan') || loc.includes('antique') || loc.includes('capiz') || 
+        loc.includes('guimaras') || loc.includes('iloilo') || loc.includes('negros occidental')) return 'Region VI (Western Visayas)';
+    
+    // Region VII (Central Visayas)
+    if (loc.includes('bohol') || loc.includes('cebu') || loc.includes('negros oriental') || 
+        loc.includes('siquijor')) return 'Region VII (Central Visayas)';
+    
+    // Region VIII (Eastern Visayas)
+    if (loc.includes('biliran') || loc.includes('eastern samar') || loc.includes('leyte') || 
+        loc.includes('northern samar') || loc.includes('samar') || loc.includes('southern leyte')) return 'Region VIII (Eastern Visayas)';
+    
+    // Region IX (Zamboanga Peninsula)
+    if (loc.includes('zamboanga del norte') || loc.includes('zamboanga del sur') || 
+        loc.includes('zamboanga sibugay')) return 'Region IX (Zamboanga Peninsula)';
+    
+    // Region X (Northern Mindanao)
+    if (loc.includes('bukidnon') || loc.includes('camiguin') || loc.includes('lanao del norte') || 
+        loc.includes('misamis occidental') || loc.includes('misamis oriental')) return 'Region X (Northern Mindanao)';
+    
+    // Region XI (Davao)
+    if (loc.includes('davao')) return 'Region XI (Davao)';
+    
+    // Region XII (SOCCSKSARGEN)
+    if (loc.includes('cotabato') || loc.includes('sarangani') || 
+        loc.includes('south cotabato') || loc.includes('sultan kudarat')) return 'Region XII (SOCCSKSARGEN)';
+    
+    // Region XIII (Caraga)
+    if (loc.includes('agusan del norte') || loc.includes('agusan del sur') || 
+        loc.includes('dinagat') || loc.includes('surigao del norte') || loc.includes('surigao del sur')) return 'Region XIII (Caraga)';
+    
+    // BARMM
+    if (loc.includes('basilan') || loc.includes('lanao del sur') || loc.includes('maguindanao') || 
+        loc.includes('sulu') || loc.includes('tawi-tawi')) return 'BARMM';
+    
+    // Mindanao (general)
+    if (loc.includes('mindanao')) return 'Mindanao';
+    
+    return 'Unknown Region';
+  };
 
   // Fetch field distribution and overview data from backend
   useEffect(() => {
@@ -408,11 +487,166 @@ export default function AnalyticsPage() {
         setYieldTrendsData(yieldTrends);
         setAllDeliveries(deliveries);
         setAllHarvestHistory(harvestHistory);
+
+        // Process top performing crops by region
+        const regionPerformance = new Map<string, any>();
+        
+        harvestHistory.forEach((harvest: any) => {
+          // Find the field for this harvest
+          const field = fields.find((f: any) => f.id === harvest.field_id);
+          const region = field ? getRegionFromLocation(field.location || '') : 'Unknown Region';
+          
+          // Calculate health percentage
+          let health = 0;
+          if (harvest.expected_yield_kg && harvest.expected_yield_kg > 0) {
+            const healthPercent = (harvest.actual_yield_kg || 0) / harvest.expected_yield_kg * 100;
+            health = Math.min(healthPercent, 100);
+          }
+          
+          if (regionPerformance.has(region)) {
+            const existing = regionPerformance.get(region);
+            existing.yield += harvest.actual_yield_kg || 0;
+            existing.healthValues.push(health);
+            existing.count += 1;
+          } else {
+            regionPerformance.set(region, {
+              region: region,
+              variant: harvest.crop_name,
+              yield: harvest.actual_yield_kg || 0,
+              revenue: 0,
+              healthValues: [health],
+              count: 1,
+            });
+          }
+        });
+        
+        // Add revenue from deliveries
+        deliveries.forEach((delivery: any) => {
+          delivery.items?.forEach((item: any) => {
+            // Find field with this variant
+            const fieldWithVariant = fields.find((f: any) => {
+              const fieldCrops = crops.filter((c: any) => c.field_id === f.id);
+              return fieldCrops.some((c: any) => c.name === item.variety);
+            });
+            
+            if (fieldWithVariant) {
+              const region = getRegionFromLocation(fieldWithVariant.location || '');
+              if (regionPerformance.has(region)) {
+                const pricePerKg = inventory.find((inv: any) => inv.name === item.variety)?.price_per_unit || 0;
+                const itemRevenue = (item.sacks * item.sack_size_kg * pricePerKg);
+                regionPerformance.get(region).revenue += itemRevenue;
+              }
+            }
+          });
+        });
+        
+        // Convert to array and calculate performance rating
+        const topRegions = Array.from(regionPerformance.values())
+          .filter(r => r.region !== 'Unknown Region')
+          .map(r => {
+            const avgHealth = r.healthValues.reduce((sum: number, h: number) => sum + h, 0) / r.healthValues.length;
+            const performance = avgHealth >= 90 ? 'Excellent' : avgHealth >= 75 ? 'Good' : 'Fair';
+            return {
+              region: r.region,
+              variant: r.variant,
+              yield: r.yield,
+              revenue: r.revenue,
+              performance: performance,
+            };
+          })
+          .sort((a, b) => b.yield - a.yield)
+          .slice(0, 3);
+        
+        setTopByRegion(topRegions);
+        
+        // Process top performing crops by season (similar to rice variants)
+        const seasonPerformance = new Map<string, any>();
+        
+        harvestHistory.forEach((harvest: any) => {
+          // Determine season from actual_harvest_date
+          let season = "Unknown";
+          if (harvest.actual_harvest_date) {
+            const harvestDate = new Date(harvest.actual_harvest_date);
+            const month = harvestDate.getMonth() + 1; // 1-12
+            
+            // Wet season: June (6) to November (11)
+            // Dry season: December (12) to May (5)
+            if (month >= 6 && month <= 11) {
+              season = "Wet Season";
+            } else {
+              season = "Dry Season";
+            }
+          }
+          
+          // Calculate health percentage
+          let health = 0;
+          if (harvest.expected_yield_kg && harvest.expected_yield_kg > 0) {
+            const healthPercent = (harvest.actual_yield_kg || 0) / harvest.expected_yield_kg * 100;
+            health = Math.min(healthPercent, 100);
+          }
+          
+          const key = `${harvest.crop_name}-${season}`;
+          
+          if (seasonPerformance.has(key)) {
+            const existing = seasonPerformance.get(key);
+            existing.yield += harvest.actual_yield_kg || 0;
+            existing.healthValues.push(health);
+            existing.count += 1;
+          } else {
+            seasonPerformance.set(key, {
+              season: season,
+              variant: harvest.crop_name,
+              yield: harvest.actual_yield_kg || 0,
+              revenue: 0,
+              healthValues: [health],
+              count: 1,
+            });
+          }
+        });
+        
+        // Add revenue from deliveries by season
+        deliveries.forEach((delivery: any) => {
+          if (delivery.delivery_date) {
+            const deliveryDate = new Date(delivery.delivery_date);
+            const month = deliveryDate.getMonth() + 1;
+            const season = (month >= 6 && month <= 11) ? "Wet Season" : "Dry Season";
+            
+            delivery.items?.forEach((item: any) => {
+              const key = `${item.variety}-${season}`;
+              if (seasonPerformance.has(key)) {
+                const pricePerKg = inventory.find((inv: any) => inv.name === item.variety)?.price_per_unit || 0;
+                const itemRevenue = (item.sacks * item.sack_size_kg * pricePerKg);
+                seasonPerformance.get(key).revenue += itemRevenue;
+              }
+            });
+          }
+        });
+        
+        // Convert to array and calculate performance rating
+        const topSeasons = Array.from(seasonPerformance.values())
+          .filter(s => s.season !== 'Unknown')
+          .map(s => {
+            const avgHealth = s.healthValues.reduce((sum: number, h: number) => sum + h, 0) / s.healthValues.length;
+            const performance = avgHealth >= 90 ? 'Excellent' : avgHealth >= 75 ? 'Good' : 'Fair';
+            return {
+              season: s.season,
+              variant: s.variant,
+              yield: s.yield,
+              revenue: s.revenue,
+              performance: performance,
+            };
+          })
+          .sort((a, b) => b.yield - a.yield)
+          .slice(0, 3);
+        
+        setTopBySeason(topSeasons);
       } catch (error) {
         console.error("Error fetching analytics data:", error);
         // Fall back to mock data on error
         setFieldDistribution(mockData.fieldDistribution);
         setOverviewData(mockData.overview);
+        setTopByRegion([]);
+        setTopBySeason([]);
       } finally {
         setLoading(false);
       }
@@ -803,81 +1037,271 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* High-Performing Crops by Location/Season */}
+          {/* Planting & Harvest Analytics */}
           <div
             className={`${
               isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
             } rounded-2xl shadow-lg border p-6 mb-8`}
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className={`text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
-                High-Performing Crops Analysis
-              </h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setViewMode("location")}
-                  className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${
-                    viewMode === "location"
-                      ? "bg-gradient-to-r from-green-500 to-green-600 text-white"
-                      : isDark
-                      ? "bg-slate-700 text-slate-300 hover:bg-slate-600"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                  }`}
-                >
-                  By Location
-                </button>
-                <button
-                  onClick={() => setViewMode("season")}
-                  className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${
-                    viewMode === "season"
-                      ? "bg-gradient-to-r from-green-500 to-green-600 text-white"
-                      : isDark
-                      ? "bg-slate-700 text-slate-300 hover:bg-slate-600"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                  }`}
-                >
-                  By Season
-                </button>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className={`text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"} mb-1`}>
+                  Planting & Harvest Analytics
+                </h2>
+                <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                  Useful for planning and comparison
+                </p>
               </div>
+              <Calendar className={`w-5 h-5 ${isDark ? "text-slate-400" : "text-slate-600"}`} />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {(viewMode === "location" ? mockData.topByLocation : mockData.topBySeason).map((item, index) => (
-                <div
-                  key={index}
-                  className={`p-4 rounded-xl border ${
-                    isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
-                      {viewMode === "location" && "location" in item ? item.location : "season" in item ? item.season : ""}
-                    </h3>
-                    <span
-                      className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                        item.performance === "Excellent"
-                          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-                          : item.performance === "Good"
-                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
-                          : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400"
-                      }`}
-                    >
-                      {item.performance}
-                    </span>
-                  </div>
-                  <p className={`text-sm mb-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                    Variant: <span className="font-medium">{item.variant}</span>
-                  </p>
-                  <div className="flex items-center gap-4 text-sm">
-                    <span className={isDark ? "text-slate-400" : "text-slate-600"}>
-                      Yield: <span className="font-medium">{item.yield.toLocaleString()} kg</span>
-                    </span>
-                    <span className={`font-semibold ${isDark ? "text-green-400" : "text-green-600"}`}>
-                      ₱{item.revenue.toLocaleString()}
-                    </span>
+
+            {loading ? (
+              <div className={`text-center py-8 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                Loading planting data...
+              </div>
+            ) : allHarvestHistory.length === 0 ? (
+              <div className={`text-center py-8 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                No harvest history available
+              </div>
+            ) : (
+              <>
+                {/* Average Days to Harvest Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  {(() => {
+                    // Calculate average days to harvest per variety
+                    const varietyMap = new Map<string, { totalDays: number; count: number; plantings: any[] }>();
+                    
+                    allHarvestHistory.forEach((harvest: any) => {
+                      if (harvest.planting_date && harvest.actual_harvest_date) {
+                        const plantDate = new Date(harvest.planting_date);
+                        const harvestDate = new Date(harvest.actual_harvest_date);
+                        const days = Math.floor((harvestDate.getTime() - plantDate.getTime()) / (1000 * 60 * 60 * 24));
+                        
+                        if (days > 0) {
+                          if (!varietyMap.has(harvest.crop_name)) {
+                            varietyMap.set(harvest.crop_name, { totalDays: 0, count: 0, plantings: [] });
+                          }
+                          const entry = varietyMap.get(harvest.crop_name)!;
+                          entry.totalDays += days;
+                          entry.count += 1;
+                          entry.plantings.push({
+                            plantDate,
+                            harvestDate,
+                            days,
+                            expectedYield: harvest.expected_yield_kg,
+                            actualYield: harvest.actual_yield_kg
+                          });
+                        }
+                      }
+                    });
+
+                    const varietyStats = Array.from(varietyMap.entries())
+                      .map(([name, data]) => ({
+                        name,
+                        avgDays: Math.round(data.totalDays / data.count),
+                        count: data.count,
+                        plantings: data.plantings
+                      }))
+                      .sort((a, b) => b.count - a.count)
+                      .slice(0, 3);
+
+                    return varietyStats.map((stat, index) => (
+                      <div
+                        key={index}
+                        className={`p-4 rounded-xl border ${
+                          isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+                        }`}
+                      >
+                        <h3 className={`font-semibold mb-2 ${isDark ? "text-white" : "text-slate-900"}`}>
+                          {stat.name}
+                        </h3>
+                        <div className="flex items-baseline gap-2 mb-1">
+                          <span className={`text-3xl font-bold ${isDark ? "text-green-400" : "text-green-600"}`}>
+                            {stat.avgDays}
+                          </span>
+                          <span className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                            days avg
+                          </span>
+                        </div>
+                        <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                          Based on {stat.count} harvest{stat.count !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    ));
+                  })()}
+                </div>
+
+                {/* Planting Timeline - Gantt-style */}
+                <div className="mb-6">
+                  <h3 className={`text-lg font-semibold mb-4 ${isDark ? "text-white" : "text-slate-900"}`}>
+                    📊 Planting to Harvest Timeline
+                  </h3>
+                  <div className="space-y-3">
+                    {allHarvestHistory
+                      .filter((h: any) => h.planting_date && h.actual_harvest_date)
+                      .sort((a: any, b: any) => new Date(b.planting_date).getTime() - new Date(a.planting_date).getTime())
+                      .slice(0, 8)
+                      .map((harvest: any, index: number) => {
+                        const plantDate = new Date(harvest.planting_date);
+                        const harvestDate = new Date(harvest.actual_harvest_date);
+                        const expectedHarvestDate = harvest.expected_harvest_date ? new Date(harvest.expected_harvest_date) : null;
+                        const daysActual = Math.floor((harvestDate.getTime() - plantDate.getTime()) / (1000 * 60 * 60 * 24));
+                        const daysExpected = expectedHarvestDate 
+                          ? Math.floor((expectedHarvestDate.getTime() - plantDate.getTime()) / (1000 * 60 * 60 * 24))
+                          : daysActual;
+                        const variance = daysActual - daysExpected;
+                        const isOnTime = Math.abs(variance) <= 7;
+
+                        return (
+                          <div key={index} className={`p-3 rounded-lg border ${
+                            isDark ? "bg-slate-700/30 border-slate-600" : "bg-white border-slate-200"
+                          }`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex-1">
+                                <span className={`font-medium ${isDark ? "text-white" : "text-slate-900"}`}>
+                                  {harvest.crop_name}
+                                </span>
+                                <div className="flex items-center gap-4 mt-1">
+                                  <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                                    Planted: {plantDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </span>
+                                  <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                                    Harvested: {harvestDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-sm font-semibold ${isDark ? "text-green-400" : "text-green-600"}`}>
+                                  {daysActual} days
+                                </span>
+                                {expectedHarvestDate && (
+                                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                    isOnTime
+                                      ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                                      : variance > 0
+                                        ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
+                                        : "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+                                  }`}>
+                                    {variance > 0 ? `+${variance}d` : variance < 0 ? `${variance}d` : 'On Time'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {/* Timeline bar */}
+                            <div className="relative h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                              <div
+                                className="absolute h-full bg-gradient-to-r from-green-500 to-green-600 rounded-full"
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+                            {expectedHarvestDate && (
+                              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Expected: {expectedHarvestDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ({daysExpected} days)
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
-              ))}
-            </div>
+
+                {/* Actual vs Planned Harvest Table */}
+                <div className="overflow-x-auto">
+                  <h3 className={`text-lg font-semibold mb-4 ${isDark ? "text-white" : "text-slate-900"}`}>
+                    Actual vs Planned Harvest
+                  </h3>
+                  <table className="w-full">
+                    <thead>
+                      <tr className={`border-b ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+                        <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          Variety
+                        </th>
+                        <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          Planting Date
+                        </th>
+                        <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          Expected Harvest
+                        </th>
+                        <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          Actual Harvest
+                        </th>
+                        <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          Variance
+                        </th>
+                        <th className={`text-left py-3 px-4 text-sm font-semibold ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allHarvestHistory
+                        .filter((h: any) => h.planting_date && h.actual_harvest_date)
+                        .sort((a: any, b: any) => new Date(b.actual_harvest_date).getTime() - new Date(a.actual_harvest_date).getTime())
+                        .slice(0, 10)
+                        .map((harvest: any, index: number) => {
+                          const plantDate = new Date(harvest.planting_date);
+                          const harvestDate = new Date(harvest.actual_harvest_date);
+                          const expectedHarvestDate = harvest.expected_harvest_date ? new Date(harvest.expected_harvest_date) : null;
+                          const variance = expectedHarvestDate 
+                            ? Math.floor((harvestDate.getTime() - expectedHarvestDate.getTime()) / (1000 * 60 * 60 * 24))
+                            : 0;
+                          const isOnTime = Math.abs(variance) <= 7;
+
+                          return (
+                            <tr
+                              key={index}
+                              className={`border-b ${isDark ? "border-slate-700 hover:bg-slate-700/50" : "border-slate-100 hover:bg-slate-50"} transition-colors`}
+                            >
+                              <td className={`py-3 px-4 font-medium ${isDark ? "text-white" : "text-slate-900"}`}>
+                                {harvest.crop_name}
+                              </td>
+                              <td className={`py-3 px-4 text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                {plantDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </td>
+                              <td className={`py-3 px-4 text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                {expectedHarvestDate 
+                                  ? expectedHarvestDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                  : '—'}
+                              </td>
+                              <td className={`py-3 px-4 text-sm ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                                {harvestDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </td>
+                              <td className={`py-3 px-4 text-sm font-medium ${
+                                !expectedHarvestDate
+                                  ? isDark ? "text-slate-400" : "text-slate-600"
+                                  : variance > 0
+                                    ? "text-red-600 dark:text-red-400"
+                                    : variance < 0
+                                      ? "text-blue-600 dark:text-blue-400"
+                                      : "text-green-600 dark:text-green-400"
+                              }`}>
+                                {!expectedHarvestDate
+                                  ? '—'
+                                  : variance > 0 
+                                    ? `+${variance} days` 
+                                    : variance < 0 
+                                      ? `${variance} days` 
+                                      : 'On Time'}
+                              </td>
+                              <td className="py-3 px-4">
+                                {expectedHarvestDate ? (
+                                  isOnTime ? (
+                                    <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
+                                  ) : (
+                                    <AlertCircle className={`w-5 h-5 ${variance > 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
+                                  )
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Rice Variants Performance Table */}

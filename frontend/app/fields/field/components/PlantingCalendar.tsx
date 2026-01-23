@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useTheme } from "../../../components/ThemeProvider";
 import Image from "next/image";
 
 // Import your local PNG files
@@ -38,6 +39,8 @@ interface EventData {
 }
 
 export default function PlantingCalendar({ fieldId, initialPlantingDate, initialHarvestDate, onPlantingDateChange, onHarvestDateChange }: Props) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const storageKey = `field-${fieldId}-dates`;
   const eventsKey = `field-${fieldId}-events`;
   
@@ -649,7 +652,8 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
         body: JSON.stringify({ 
           actual_harvest_date: harvestFormDate,
           actual_yield_kg: actualYieldKg ? parseFloat(actualYieldKg) : undefined,
-          notes: harvestNotes || undefined
+          notes: harvestNotes || undefined,
+          calendar_events: events
         }),
       });
 
@@ -714,6 +718,8 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
       try {
         localStorage.removeItem('cachedFieldsData');
         localStorage.removeItem('cachedInventoryData');
+        localStorage.removeItem(storageKey);
+        localStorage.removeItem(eventsKey);
       } catch (e) {
         console.error("Error clearing cache:", e);
       }
@@ -848,6 +854,7 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
               const days = new Date(year, month + 1, 0).getDate();
               const startOffset = first.getDay();
               const monthName = first.toLocaleString(undefined, { month: 'long' });
+              const plantingCutoff = plantingDate ? new Date(plantingDate + 'T00:00:00') : null;
 
               function prev() { setVisibleMonthIndex(i => Math.max(0, i - 1)); }
               function next() { setVisibleMonthIndex(i => Math.min(calendarRanges.length - 1, i + 1)); }
@@ -879,6 +886,7 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                       const e = events[key] || {};
                       const isPlanting = plantingDate === key;
                       const isHarvest = harvestDate === key;
+                      const isBeforePlanting = plantingCutoff ? date < plantingCutoff : false;
                       const hasTyphoon = e.typhoon;
                       const typhoonData = e.typhoonData;
                       const typhoonDayNumber = getTyphoonDayNumber(key);
@@ -889,6 +897,7 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                         : isPlanting || isHarvest 
                         ? 'bg-green-200/80 ring-2 ring-green-400' 
                         : '';
+                      const effectiveHighlight = isBeforePlanting ? '' : highlightClass;
                       
                       // Count active events for layout
                       const activeEvents = [
@@ -907,8 +916,9 @@ export default function PlantingCalendar({ fieldId, initialPlantingDate, initial
                         <button
                           key={key}
                           type="button"
+                          disabled={isBeforePlanting}
                           onClick={() => handleDateClick(key)}
-                          className={`h-16 p-1 border rounded-md text-left hover:bg-slate-50 ${selectedDate === key ? 'ring-2 ring-green-300' : ''} ${highlightClass}`}
+                          className={`h-16 p-1 border rounded-md text-left ${selectedDate === key && !isBeforePlanting ? 'ring-2 ring-green-300' : ''} ${effectiveHighlight} ${isBeforePlanting ? (isDark ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed') : 'hover:bg-slate-50'}`}
                         >
                           <div className="flex flex-col h-full justify-between">
                             <div className="flex justify-between">

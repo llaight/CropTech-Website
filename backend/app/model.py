@@ -7,10 +7,10 @@ from pathlib import Path
 loaded = load_dotenv()
 env_example = Path(__file__).resolve().parents[1] / '.env.example'
 if not loaded and env_example.exists():
-        load_dotenv(env_example)
-        print(f"Loaded environment variables from {env_example}")
+    load_dotenv(env_example)
+    print(f"Loaded environment variables from {env_example}")
 elif not loaded:
-        print("No .env file found. Copy '.env.example' to '.env' or set environment variables for the database.")
+    print("No .env file found. Copy '.env.example' to '.env' or set environment variables for the database.")
 
 def get_connection():
     try:
@@ -197,21 +197,22 @@ def create_tables():
 
     # crop harvest history table
     cursor.execute("""
-            CREATE TABLE IF NOT EXISTS crop_harvest_history(
-                   harvest_id SERIAL PRIMARY KEY,
-                   crop_id INTEGER REFERENCES crops(crop_id) ON DELETE SET NULL,
-                   field_id INTEGER REFERENCES fields(field_id) ON DELETE SET NULL,
-                   user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
-                   crop_name TEXT NOT NULL,
-                   planting_date DATE,
-                   expected_harvest_date DATE,
-                   actual_harvest_date DATE,
-                   expected_yield_kg FLOAT,
-                   actual_yield_kg FLOAT,
-                   notes TEXT,
-                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                   )       
-            """)
+             CREATE TABLE IF NOT EXISTS crop_harvest_history(
+                     harvest_id SERIAL PRIMARY KEY,
+                     crop_id INTEGER REFERENCES crops(crop_id) ON DELETE SET NULL,
+                     field_id INTEGER REFERENCES fields(field_id) ON DELETE SET NULL,
+                     user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                     crop_name TEXT NOT NULL,
+                     planting_date DATE,
+                     expected_harvest_date DATE,
+                     actual_harvest_date DATE,
+                     expected_yield_kg FLOAT,
+                     actual_yield_kg FLOAT,
+                     notes TEXT,
+                     calendar_events JSONB,
+                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                     )       
+             """)
 
     # Add columns for existing deployments
     cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS crop_id INTEGER;")
@@ -224,6 +225,7 @@ def create_tables():
     cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS expected_yield_kg FLOAT;")
     cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS actual_yield_kg FLOAT;")
     cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS notes TEXT;")
+    cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS calendar_events JSONB;")
     cursor.execute("ALTER TABLE crop_harvest_history ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
     
     # marketprice table

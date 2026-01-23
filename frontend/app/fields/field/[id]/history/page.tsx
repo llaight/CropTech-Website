@@ -14,7 +14,25 @@ interface HarvestHistory {
   expected_yield_kg: number;
   actual_yield_kg: number;
   notes: string;
+  calendar_events?: Record<string, CalendarEvent> | null;
   created_at: string;
+}
+
+interface CalendarEvent {
+  watered?: boolean;
+  fertilizer?: boolean;
+  pesticide?: boolean;
+  typhoon?: boolean;
+  typhoonData?: {
+    name?: string;
+    signalWarning?: string;
+    rainfallWarning?: string;
+    duration?: string;
+    durationUnit?: string;
+    isStartDate?: boolean;
+    typhoonId?: string;
+  };
+  note?: string;
 }
 
 export default function FieldHistoryPage() {
@@ -25,6 +43,7 @@ export default function FieldHistoryPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fieldName, setFieldName] = useState<string>("");
+  const [selectedRecord, setSelectedRecord] = useState<HarvestHistory | null>(null);
 
   useEffect(() => {
     const loadHistory = async () => {
@@ -50,15 +69,28 @@ export default function FieldHistoryPage() {
         const historyRes = await fetch(`http://localhost:5001/api/fields/${encodeURIComponent(fieldId)}/harvest-history`, { headers });
         if (historyRes.ok) {
           const data = await historyRes.json().catch(() => ({}));
-          const historyData = ((data.history || []) as HarvestHistory[]).map((item) => ({
-            ...item,
-            // Normalize possible null/undefined payloads so rendering and math stay safe
-            expected_yield_kg: Number(item.expected_yield_kg ?? 0),
-            actual_yield_kg: Number(item.actual_yield_kg ?? 0),
-            planting_date: item.planting_date || "",
-            harvest_date: item.harvest_date || "",
-            notes: item.notes || "-",
-          }));
+          const historyData = ((data.history || []) as HarvestHistory[]).map((item) => {
+            let parsedEvents: Record<string, CalendarEvent> | null = null;
+            const rawEvents = (item as any).calendar_events;
+            if (rawEvents) {
+              try {
+                parsedEvents = typeof rawEvents === "string" ? JSON.parse(rawEvents) : rawEvents;
+              } catch (e) {
+                console.warn("Failed to parse calendar events for record", item.id, e);
+              }
+            }
+
+            return {
+              ...item,
+              calendar_events: parsedEvents,
+              // Normalize possible null/undefined payloads so rendering and math stay safe
+              expected_yield_kg: Number(item.expected_yield_kg ?? 0),
+              actual_yield_kg: Number(item.actual_yield_kg ?? 0),
+              planting_date: item.planting_date || "",
+              harvest_date: item.harvest_date || "",
+              notes: item.notes || "-",
+            };
+          });
           setHistory(historyData);
           console.log("Loaded harvest history:", historyData.length, "records");
         } else if (historyRes.status === 404) {
@@ -79,6 +111,29 @@ export default function FieldHistoryPage() {
       loadHistory();
     }
   }, [fieldId]);
+
+  const summarizeEvents = (events?: Record<string, CalendarEvent> | null) => {
+    if (!events) return { watered: 0, fertilizer: 0, pesticide: 0, typhoon: 0, noted: 0 };
+    return Object.values(events).reduce(
+      (acc, evt) => ({
+        watered: acc.watered + (evt.watered ? 1 : 0),
+        fertilizer: acc.fertilizer + (evt.fertilizer ? 1 : 0),
+        pesticide: acc.pesticide + (evt.pesticide ? 1 : 0),
+        typhoon: acc.typhoon + (evt.typhoon ? 1 : 0),
+        noted: acc.noted + (evt.note ? 1 : 0),
+      }),
+      { watered: 0, fertilizer: 0, pesticide: 0, typhoon: 0, noted: 0 }
+    );
+  };
+
+  const renderEventTags = (event: CalendarEvent) => (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      {event.watered && <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Watered</span>}
+      {event.fertilizer && <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Fertilizer</span>}
+      {event.pesticide && <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Pesticide</span>}
+      {event.typhoon && <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-700">Typhoon</span>}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-brand-hero p-6">
@@ -141,6 +196,7 @@ export default function FieldHistoryPage() {
                     <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Expected Yield (kg)</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Actual Yield (kg)</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Notes</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Calendar</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -175,6 +231,19 @@ export default function FieldHistoryPage() {
                           {record.notes || "-"}
                         </div>
                       </td>
+                      <td className="px-6 py-4 text-sm text-slate-600">
+                        {record.calendar_events ? (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedRecord(record)}
+                            className="px-3 py-1 border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50"
+                          >
+                            View
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">No events</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -203,6 +272,87 @@ export default function FieldHistoryPage() {
           </div>
         )}
       </div>
+
+      {selectedRecord && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">{selectedRecord.crop_name} Calendar</h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  Planting: {selectedRecord.planting_date ? formatLongDate(selectedRecord.planting_date) : "N/A"} • Harvest: {selectedRecord.harvest_date ? formatLongDate(selectedRecord.harvest_date) : "N/A"}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedRecord(null)}
+                className="px-3 py-1 border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Event Summary</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(summarizeEvents(selectedRecord.calendar_events)).map(([label, count]) => (
+                    <span key={label} className="px-3 py-1 rounded-full bg-white border border-slate-200 text-sm capitalize text-slate-700">
+                      {label}: {count}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Notes</p>
+                <p className="text-sm text-slate-700 whitespace-pre-wrap">{selectedRecord.notes || "No notes"}</p>
+              </div>
+            </div>
+
+            <div className="max-h-[420px] overflow-y-auto border border-slate-200 rounded-xl">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-900">Date</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-900">Events</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-900">Notes</th>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-900">Typhoon</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedRecord.calendar_events && Object.keys(selectedRecord.calendar_events).length > 0 ? (
+                    Object.entries(selectedRecord.calendar_events)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([dateKey, event]) => (
+                        <tr key={dateKey} className="border-b border-slate-200 hover:bg-slate-50">
+                          <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{formatLongDate(dateKey)}</td>
+                          <td className="px-4 py-3">{renderEventTags(event)}</td>
+                          <td className="px-4 py-3 text-slate-700 max-w-xs">{event.note || "-"}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {event.typhoon && event.typhoonData ? (
+                              <div className="space-y-1">
+                                <p className="font-medium text-slate-800">{event.typhoonData.name || "Typhoon"}</p>
+                                <p className="text-xs text-slate-600">Signal: {event.typhoonData.signalWarning || "-"} • Rainfall: {event.typhoonData.rainfallWarning || "-"}</p>
+                                <p className="text-xs text-slate-600">Duration: {event.typhoonData.duration || "-"} {event.typhoonData.durationUnit || "days"}</p>
+                                {event.typhoonData.isStartDate && <span className="text-[11px] text-red-600 font-semibold">Start day</span>}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-4 text-center text-slate-500">No calendar events recorded</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
