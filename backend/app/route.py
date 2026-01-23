@@ -601,7 +601,7 @@ def list_inventory_crops():
         cursor.execute("""
             SELECT name, user_id
             FROM inventory
-            WHERE user_id = %s
+            WHERE user_id = %s AND grains_condition = 'to plant'
             ORDER BY name ASC;
         """, (user_id,))
         rows = cursor.fetchall()
