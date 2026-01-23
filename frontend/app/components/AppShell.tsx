@@ -4,14 +4,20 @@ import React, { useEffect, useState } from "react";
 import SideNav from "./Side-nav";
 import AppHeader from "./AppHeader";
 import { usePathname } from "next/navigation";
+import { useTheme } from "./ThemeProvider";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [authed, setAuthed] = useState(false);
   const pathname = usePathname();
   const noScroll = pathname?.startsWith("/profile");
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
 
   useEffect(() => {
-    const sync = () => setAuthed(!!localStorage.getItem("token"));
+    const sync = () => {
+      const token = localStorage.getItem("token");
+      setAuthed(!!token);
+    };
     sync();
     window.addEventListener("storage", sync);
     window.addEventListener("auth:changed", sync);
@@ -25,13 +31,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      <AppHeader />
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        <SideNav />
-        <div className={`flex-1 min-h-0 ${noScroll ? "" : "overflow-y-auto"}`}>
-          <div className="min-h-full">{children}</div>
+        <AppHeader />
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <SideNav />
+          <div className={`flex-1 min-h-0 ${noScroll ? "" : "overflow-y-auto"}`}>
+            <div className="min-h-full">{children}</div>
+          </div>
         </div>
       </div>
-    </div>
   );
 }

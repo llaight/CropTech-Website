@@ -2374,6 +2374,12 @@ const handleSackChange = (
                                         Completed on Time
                                       </button>
                                       <button
+                                        onClick={() => handleUpdateDeliveryStatus(delivery.id, 'delivered')}
+                                        className="flex-1 px-3 py-1.5 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 transition font-medium"
+                                      >
+                                        Completed Late
+                                      </button>
+                                      <button
                                         onClick={() => handleOpenReschedule(delivery)}
                                         className="flex-1 px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
                                       >

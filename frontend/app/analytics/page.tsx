@@ -937,7 +937,7 @@ export default function AnalyticsPage() {
               iconColor="bg-blue-100"
             />
             <StatCard
-              title="Total Rice Varieties Tracked"
+              title="Total Active Crops"
               value={overviewData.totalRiceVarieties}
               change={overviewData.varietiesChange}
               icon={Sprout}

@@ -88,6 +88,12 @@ export default function LandTrackerPage() {
   useEffect(() => {
     (async () => {
       try {
+        // Ensure we have a user id so we only fetch that user's fields
+        if (!userId) {
+          console.log('No user id yet, skipping fields load');
+          return;
+        }
+
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
         if (!token) {
           console.log('No token found, skipping fields load');
@@ -601,7 +607,7 @@ export default function LandTrackerPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="block">
-                <span className="text-sm font-medium text-slate-700">Field size (ha)</span>
+                <span className="text-sm font-medium text-slate-700">Field size (ha) *</span>
                 <input
                   type="number"
                   min="0"
@@ -610,6 +616,7 @@ export default function LandTrackerPage() {
                   onChange={(e) => setFieldForm((prev) => ({ ...prev, areaHa: e.target.value }))}
                   className="mt-1 w-full rounded-xl border border-green-800/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                   placeholder="e.g., 2.5"
+                  required
                 />
               </label>
 
@@ -619,7 +626,10 @@ export default function LandTrackerPage() {
                   type="date"
                   value={fieldForm.plantingDate}
                   onChange={(e) => setFieldForm((prev) => ({ ...prev, plantingDate: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-green-800/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className={`mt-1 w-full rounded-xl border border-green-800/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 ${
+                    !fieldForm.cropName ? 'bg-slate-100 cursor-not-allowed opacity-50' : ''
+                  }`}
+                  disabled={!fieldForm.cropName}
                 />
               </label>
             </div>
@@ -632,8 +642,11 @@ export default function LandTrackerPage() {
                 step="0.1"
                 value={fieldForm.expectedYield}
                 onChange={(e) => setFieldForm((prev) => ({ ...prev, expectedYield: e.target.value }))}
-                className="mt-1 w-full rounded-xl border border-green-800/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                className={`mt-1 w-full rounded-xl border border-green-800/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 ${
+                  !fieldForm.cropName ? 'bg-slate-100 cursor-not-allowed opacity-50' : ''
+                }`}
                 placeholder="e.g., 5000"
+                disabled={!fieldForm.cropName}
               />
             </label>
 
