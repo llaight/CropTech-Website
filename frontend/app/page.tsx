@@ -22,6 +22,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<{ id?: number; name?: string; role?: string } | null>(null);
   const [stats, setStats] = useState({ totalFields: 0, activeCrops: 0, harvestYieldKg: 0, totalRevenuePhp: 0 });
+  const [statsDateRange, setStatsDateRange] = useState({ fieldsDate: "", cropsDate: "", harvestDate: "", revenueDate: "" });
   const [notifications, setNotifications] = useState<any[]>([]);
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -70,6 +71,12 @@ export default function Home() {
 
         const headers: any = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 
+        // Get current month range
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const dateRangeStr = `${monthStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${monthEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
         // Total fields
         const fieldsRes = await fetch(`http://localhost:5001/api/fields?user_id=${u.id}`, { headers });
         let totalFields = 0;
@@ -88,18 +95,24 @@ export default function Home() {
           activeCrops = Array.isArray(crops) ? crops.filter((c: any) => !!c.planting_date).length : 0;
         }
 
-        // Harvest yield from history
+        // Harvest yield from history - THIS MONTH ONLY
         const harvestRes = await fetch(`http://localhost:5001/api/harvest-history?user_id=${u.id}`, { headers });
         let harvestYieldKg = 0;
         if (harvestRes.ok) {
           const hj = await harvestRes.json().catch(() => ({}));
           const history = hj.harvest_history || [];
           harvestYieldKg = Array.isArray(history)
-            ? history.reduce((sum: number, h: any) => sum + (h.actual_yield_kg || 0), 0)
+            ? history
+                .filter((h: any) => {
+                  if (!h.actual_harvest_date) return false;
+                  const harvestDate = new Date(h.actual_harvest_date);
+                  return harvestDate >= monthStart && harvestDate <= monthEnd;
+                })
+                .reduce((sum: number, h: any) => sum + (h.actual_yield_kg || 0), 0)
             : 0;
         }
 
-        // Total revenue from delivered deliveries
+        // Total revenue from delivered deliveries - THIS MONTH ONLY
         const deliveriesRes = await fetch(`http://localhost:5001/api/deliveries?user_id=${u.id}`, { headers });
         let totalRevenuePhp = 0;
         if (deliveriesRes.ok) {
@@ -107,12 +120,17 @@ export default function Home() {
           const deliveries = dj.deliveries || [];
           totalRevenuePhp = Array.isArray(deliveries)
             ? deliveries
-                .filter((d: any) => d.status === 'delivered')
+                .filter((d: any) => {
+                  if (d.status !== 'delivered' || !d.delivery_date) return false;
+                  const deliveryDate = new Date(d.delivery_date);
+                  return deliveryDate >= monthStart && deliveryDate <= monthEnd;
+                })
                 .reduce((sum: number, d: any) => sum + (d.total_revenue_php || 0), 0)
             : 0;
         }
 
         setStats({ totalFields, activeCrops, harvestYieldKg, totalRevenuePhp });
+        setStatsDateRange({ fieldsDate: "", cropsDate: "", harvestDate: dateRangeStr, revenueDate: dateRangeStr });
       } catch (e) {
         // swallow errors for dashboard
       }
@@ -202,6 +220,9 @@ export default function Home() {
                 <div>
                   <p className={`${isDark ? "text-slate-400" : "text-slate-600"} text-sm font-medium`}>Harvest Yield</p>
                   <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>{stats.harvestYieldKg.toLocaleString()} kg</p>
+                  {statsDateRange.harvestDate && (
+                    <p className={`${isDark ? "text-slate-500" : "text-slate-500"} text-xs mt-1`}>{statsDateRange.harvestDate}</p>
+                  )}
                 </div>
                 <div className={`${isDark ? "bg-yellow-900/30" : "bg-yellow-100"} w-12 h-12 rounded-xl flex items-center justify-center`}>
                   <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -218,6 +239,9 @@ export default function Home() {
                   <p className={`${isDark ? "text-white" : "text-slate-900"} text-2xl font-bold`}>{
                     (stats.totalRevenuePhp || 0).toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })
                   }</p>
+                  {statsDateRange.revenueDate && (
+                    <p className={`${isDark ? "text-slate-500" : "text-slate-500"} text-xs mt-1`}>{statsDateRange.revenueDate}</p>
+                  )}
                 </div>
                 <div className={`${isDark ? "bg-purple-900/30" : "bg-purple-100"} w-12 h-12 rounded-xl flex items-center justify-center`}>
                   <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
