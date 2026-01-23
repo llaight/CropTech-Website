@@ -42,13 +42,16 @@ const mockData = {
     { name: "NSIC Rc222", yield: 1800, revenue: 7200, health: 90, area: 8, pricePerKg: 38, location: "Laguna", season: "Wet Season" },
     { name: "Dinorado", yield: 1500, revenue: 6000, health: 82, area: 6, pricePerKg: 50, location: "Mindanao", season: "Dry Season" },
   ],
-  // Market price monitoring (real-time and historical)
+  // Market price monitoring - Department of Agriculture Suggested Retail Price (January 2026)
   marketPrices: [
-    { variant: "Jasmine Rice", currentPrice: 45, previousPrice: 42, change: 7.1, location: "Central Luzon", trend: "up" },
-    { variant: "Sinandomeng", currentPrice: 42, previousPrice: 40, change: 5.0, location: "Central Luzon", trend: "up" },
-    { variant: "IR64", currentPrice: 40, previousPrice: 38, change: 5.3, location: "Laguna", trend: "up" },
-    { variant: "NSIC Rc222", currentPrice: 38, previousPrice: 37, change: 2.7, location: "Laguna", trend: "up" },
-    { variant: "Dinorado", currentPrice: 50, previousPrice: 48, change: 4.2, location: "Mindanao", trend: "up" },
+    // Imported Commercial Rice
+    { variant: "Imported - Premium", currentPrice: 52, previousPrice: 50, change: 4.0, location: "National", trend: "up", category: "Imported Commercial" },
+    { variant: "Imported - Well Milled", currentPrice: 48, previousPrice: 47, change: 2.1, location: "National", trend: "up", category: "Imported Commercial" },
+    { variant: "Imported - Regular Milled", currentPrice: 44, previousPrice: 43, change: 2.3, location: "National", trend: "up", category: "Imported Commercial" },
+    // Local Commercial Rice
+    { variant: "Local - Premium", currentPrice: 50, previousPrice: 48, change: 4.2, location: "National", trend: "up", category: "Local Commercial" },
+    { variant: "Local - Well Milled", currentPrice: 46, previousPrice: 45, change: 2.2, location: "National", trend: "up", category: "Local Commercial" },
+    { variant: "Local - Regular Milled", currentPrice: 42, previousPrice: 41, change: 2.4, location: "National", trend: "up", category: "Local Commercial" },
   ],
   // Historical sales data
   monthlySales: [
@@ -140,6 +143,25 @@ export default function AnalyticsPage() {
   const [allHarvestHistory, setAllHarvestHistory] = useState<any[]>([]);
   const [topByRegion, setTopByRegion] = useState<any[]>([]);
   const [topBySeason, setTopBySeason] = useState<any[]>([]);
+  const [calendarAnalytics, setCalendarAnalytics] = useState<{
+    totalWatering: number;
+    totalFertilizer: number;
+    totalPesticide: number;
+    totalTyphoon: number;
+    totalNotes: number;
+    avgEventsPerCycle: number;
+    totalHarvestCycles: number;
+    mostRecentEvents: Array<{ date: string; type: string; note?: string; cropName?: string }>;
+  }>({
+    totalWatering: 0,
+    totalFertilizer: 0,
+    totalPesticide: 0,
+    totalTyphoon: 0,
+    totalNotes: 0,
+    avgEventsPerCycle: 0,
+    totalHarvestCycles: 0,
+    mostRecentEvents: [],
+  });
 
   const isDark = theme === "dark";
 
@@ -487,6 +509,75 @@ export default function AnalyticsPage() {
         setYieldTrendsData(yieldTrends);
         setAllDeliveries(deliveries);
         setAllHarvestHistory(harvestHistory);
+
+        // Process calendar analytics from harvest history
+        let totalWatering = 0;
+        let totalFertilizer = 0;
+        let totalPesticide = 0;
+        let totalTyphoon = 0;
+        let totalNotes = 0;
+        let totalEvents = 0;
+        const recentEvents: Array<{ date: string; type: string; note?: string; cropName?: string }> = [];
+
+        harvestHistory.forEach((history: any) => {
+          const calendarEvents = history.calendar_events;
+          if (calendarEvents && typeof calendarEvents === 'object') {
+            Object.entries(calendarEvents).forEach(([dateKey, event]: [string, any]) => {
+              if (event.watered) {
+                totalWatering++;
+                totalEvents++;
+                recentEvents.push({ date: dateKey, type: 'Watering', cropName: history.crop_name });
+              }
+              if (event.fertilizer) {
+                totalFertilizer++;
+                totalEvents++;
+                recentEvents.push({ date: dateKey, type: 'Fertilizer', cropName: history.crop_name });
+              }
+              if (event.pesticide) {
+                totalPesticide++;
+                totalEvents++;
+                recentEvents.push({ date: dateKey, type: 'Pesticide', cropName: history.crop_name });
+              }
+              if (event.typhoon) {
+                totalTyphoon++;
+                totalEvents++;
+                recentEvents.push({ 
+                  date: dateKey, 
+                  type: 'Typhoon', 
+                  note: event.typhoonData?.name || 'Typhoon',
+                  cropName: history.crop_name 
+                });
+              }
+              if (event.note) {
+                totalNotes++;
+                recentEvents.push({ 
+                  date: dateKey, 
+                  type: 'Note', 
+                  note: event.note.substring(0, 50) + (event.note.length > 50 ? '...' : ''),
+                  cropName: history.crop_name 
+                });
+              }
+            });
+          }
+        });
+
+        // Sort recent events by date (descending) and take top 5
+        const sortedRecentEvents = recentEvents
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+          .slice(0, 5);
+
+        const avgEventsPerCycle = harvestHistory.length > 0 ? totalEvents / harvestHistory.length : 0;
+
+        setCalendarAnalytics({
+          totalWatering,
+          totalFertilizer,
+          totalPesticide,
+          totalTyphoon,
+          totalNotes,
+          avgEventsPerCycle: Math.round(avgEventsPerCycle * 10) / 10,
+          totalHarvestCycles: harvestHistory.length,
+          mostRecentEvents: sortedRecentEvents,
+        });
 
         // Process top performing crops by region
         const regionPerformance = new Map<string, any>();
@@ -867,54 +958,118 @@ export default function AnalyticsPage() {
               isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
             } rounded-2xl shadow-lg border p-6 mb-8`}
           >
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-4">
               <h2 className={`text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
                 Market Price Monitoring - Rice Variants
               </h2>
               <DollarSign className={`w-5 h-5 ${isDark ? "text-slate-400" : "text-slate-600"}`} />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {mockData.marketPrices.map((price, index) => (
-                <div
-                  key={index}
-                  className={`p-4 rounded-xl border ${
-                    isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
-                      {price.variant}
-                    </h3>
-                    {price.trend === "up" ? (
-                      <TrendingUp className="w-4 h-4 text-green-600" />
-                    ) : (
-                      <TrendingDown className="w-4 h-4 text-red-600" />
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={`text-2xl font-bold ${isDark ? "text-green-400" : "text-green-600"}`}>
-                      ₱{price.currentPrice}
-                    </span>
-                    <span className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-                      /kg
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className={isDark ? "text-slate-400" : "text-slate-600"}>
-                      Previous: ₱{price.previousPrice}
-                    </span>
-                    <span className={`font-medium ${price.change >= 0 ? "text-green-600" : "text-red-600"}`}>
-                      {price.change >= 0 ? "+" : ""}{price.change}%
-                    </span>
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
-                    <div className="flex items-center gap-1 text-xs text-slate-500">
-                      <MapPin className="w-3 h-3" />
-                      {price.location}
+            
+            {/* Department of Agriculture Note */}
+            <div className="mb-6">
+              <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                <span className="font-semibold">Note:</span> Suggested retail prices from the Department of Agriculture as of January 2026.
+              </p>
+            </div>
+
+            {/* Imported Commercial Rice */}
+            <div className="mb-6">
+              <h3 className={`text-lg font-semibold mb-3 ${isDark ? "text-white" : "text-slate-900"}`}>
+                Imported Commercial Rice
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {mockData.marketPrices.filter((p: any) => p.category === "Imported Commercial").map((price: any, index: number) => (
+                  <div
+                    key={index}
+                    className={`p-4 rounded-xl border ${
+                      isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
+                        {price.variant}
+                      </h3>
+                      {price.trend === "up" ? (
+                        <TrendingUp className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4 text-red-600" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`text-2xl font-bold ${isDark ? "text-green-400" : "text-green-600"}`}>
+                        ₱{price.currentPrice}
+                      </span>
+                      <span className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                        /kg
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className={isDark ? "text-slate-400" : "text-slate-600"}>
+                        Previous: ₱{price.previousPrice}
+                      </span>
+                      <span className={`font-medium ${price.change >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {price.change >= 0 ? "+" : ""}{price.change}%
+                      </span>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
+                      <div className="flex items-center gap-1 text-xs text-slate-500">
+                        <MapPin className="w-3 h-3" />
+                        {price.location}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            </div>
+
+            {/* Local Commercial Rice */}
+            <div>
+              <h3 className={`text-lg font-semibold mb-3 ${isDark ? "text-white" : "text-slate-900"}`}>
+                Local Commercial Rice
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {mockData.marketPrices.filter((p: any) => p.category === "Local Commercial").map((price: any, index: number) => (
+                  <div
+                    key={index}
+                    className={`p-4 rounded-xl border ${
+                      isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
+                        {price.variant}
+                      </h3>
+                      {price.trend === "up" ? (
+                        <TrendingUp className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4 text-red-600" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`text-2xl font-bold ${isDark ? "text-green-400" : "text-green-600"}`}>
+                        ₱{price.currentPrice}
+                      </span>
+                      <span className={`text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                        /kg
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className={isDark ? "text-slate-400" : "text-slate-600"}>
+                        Previous: ₱{price.previousPrice}
+                      </span>
+                      <span className={`font-medium ${price.change >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {price.change >= 0 ? "+" : ""}{price.change}%
+                      </span>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600">
+                      <div className="flex items-center gap-1 text-xs text-slate-500">
+                        <MapPin className="w-3 h-3" />
+                        {price.location}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -1134,7 +1289,7 @@ export default function AnalyticsPage() {
                 {/* Planting Timeline - Gantt-style */}
                 <div className="mb-6">
                   <h3 className={`text-lg font-semibold mb-4 ${isDark ? "text-white" : "text-slate-900"}`}>
-                    📊 Planting to Harvest Timeline
+                    Planting to Harvest Timeline
                   </h3>
                   <div className="space-y-3">
                     {allHarvestHistory
@@ -1377,7 +1532,7 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* Actionable Insights */}
+          {/* Calendar Analytics */}
           <div
             className={`${
               isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
@@ -1385,48 +1540,151 @@ export default function AnalyticsPage() {
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className={`text-xl font-semibold ${isDark ? "text-white" : "text-slate-900"}`}>
-                Actionable Insights & Recommendations
+                Crop Maintenance Calendar Analytics
               </h2>
-              <AlertCircle className={`w-5 h-5 ${isDark ? "text-slate-400" : "text-slate-600"}`} />
+              <Calendar className={`w-5 h-5 ${isDark ? "text-slate-400" : "text-slate-600"}`} />
             </div>
-            <div className="space-y-3">
-              {mockData.insights.map((insight, index) => (
-                <div
-                  key={index}
-                  className={`p-4 rounded-xl border flex items-start gap-3 ${
-                    isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
-                  }`}
-                >
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      insight.priority === "high"
-                        ? "bg-red-100 dark:bg-red-900/30"
-                        : insight.priority === "medium"
-                        ? "bg-yellow-100 dark:bg-yellow-900/30"
-                        : "bg-blue-100 dark:bg-blue-900/30"
-                    }`}
-                  >
-                    {insight.type === "recommendation" ? (
-                      <CheckCircle2 className={`w-4 h-4 ${
-                        insight.priority === "high" ? "text-red-600 dark:text-red-400" :
-                        insight.priority === "medium" ? "text-yellow-600 dark:text-yellow-400" :
-                        "text-blue-600 dark:text-blue-400"
-                      }`} />
-                    ) : (
-                      <AlertCircle className={`w-4 h-4 ${
-                        insight.priority === "high" ? "text-red-600 dark:text-red-400" :
-                        insight.priority === "medium" ? "text-yellow-600 dark:text-yellow-400" :
-                        "text-blue-600 dark:text-blue-400"
-                      }`} />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className={`${isDark ? "text-slate-300" : "text-slate-700"}`}>
-                      {insight.message}
-                    </p>
-                  </div>
+            
+            {/* Summary Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+              <div className={`p-4 rounded-xl border ${
+                isDark ? "bg-blue-900/20 border-blue-800" : "bg-blue-50 border-blue-200"
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Droplets className="w-4 h-4 text-blue-600" />
+                  <p className={`text-xs font-semibold ${isDark ? "text-blue-400" : "text-blue-600"}`}>Watering</p>
                 </div>
-              ))}
+                <p className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {calendarAnalytics.totalWatering}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-xl border ${
+                isDark ? "bg-amber-900/20 border-amber-800" : "bg-amber-50 border-amber-200"
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Sprout className="w-4 h-4 text-amber-600" />
+                  <p className={`text-xs font-semibold ${isDark ? "text-amber-400" : "text-amber-600"}`}>Fertilizer</p>
+                </div>
+                <p className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {calendarAnalytics.totalFertilizer}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-xl border ${
+                isDark ? "bg-emerald-900/20 border-emerald-800" : "bg-emerald-50 border-emerald-200"
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Package className="w-4 h-4 text-emerald-600" />
+                  <p className={`text-xs font-semibold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>Pesticide</p>
+                </div>
+                <p className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {calendarAnalytics.totalPesticide}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-xl border ${
+                isDark ? "bg-red-900/20 border-red-800" : "bg-red-50 border-red-200"
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Wind className="w-4 h-4 text-red-600" />
+                  <p className={`text-xs font-semibold ${isDark ? "text-red-400" : "text-red-600"}`}>Typhoons</p>
+                </div>
+                <p className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {calendarAnalytics.totalTyphoon}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-xl border ${
+                isDark ? "bg-purple-900/20 border-purple-800" : "bg-purple-50 border-purple-200"
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle className="w-4 h-4 text-purple-600" />
+                  <p className={`text-xs font-semibold ${isDark ? "text-purple-400" : "text-purple-600"}`}>Notes</p>
+                </div>
+                <p className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {calendarAnalytics.totalNotes}
+                </p>
+              </div>
+            </div>
+
+            {/* Statistics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className={`p-4 rounded-xl border ${
+                isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+              }`}>
+                <p className={`text-sm font-medium mb-1 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                  Total Harvest Cycles
+                </p>
+                <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {calendarAnalytics.totalHarvestCycles}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-xl border ${
+                isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+              }`}>
+                <p className={`text-sm font-medium mb-1 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                  Avg. Events per Cycle
+                </p>
+                <p className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                  {calendarAnalytics.avgEventsPerCycle}
+                </p>
+              </div>
+            </div>
+
+            {/* Recent Events */}
+            <div>
+              <h3 className={`text-sm font-semibold mb-3 ${isDark ? "text-slate-300" : "text-slate-700"}`}>
+                Recent Maintenance Activities
+              </h3>
+              <div className="space-y-2">
+                {calendarAnalytics.mostRecentEvents.length > 0 ? (
+                  calendarAnalytics.mostRecentEvents.map((event: any, index: number) => (
+                    <div
+                      key={index}
+                      className={`p-3 rounded-lg border flex items-center justify-between ${
+                        isDark ? "bg-slate-700/50 border-slate-600" : "bg-slate-50 border-slate-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`px-2 py-1 rounded-md text-xs font-medium ${
+                            event.type === "Watering"
+                              ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                              : event.type === "Fertilizer"
+                              ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                              : event.type === "Pesticide"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                              : event.type === "Typhoon"
+                              ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                              : "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
+                          }`}
+                        >
+                          {event.type}
+                        </span>
+                        <div>
+                          <p className={`text-sm font-medium ${isDark ? "text-white" : "text-slate-900"}`}>
+                            {event.cropName || "Unknown Crop"}
+                          </p>
+                          {event.note && (
+                            <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                              {event.note}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                        {new Date(event.date).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className={`text-center py-8 ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                    No maintenance activities recorded yet
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

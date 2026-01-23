@@ -97,7 +97,7 @@ export default function LandTrackerPage() {
         const headers: any = { 'Content-Type': 'application/json' };
         headers['Authorization'] = `Bearer ${token}`;
 
-        console.log('🔍 Checking for cached fields/inventory data...');
+        console.log('Checking for cached fields/inventory data...');
         // Try to load from cache first
         const cachedData = getCachedData();
         let fieldsData = cachedData?.fields || [];
@@ -105,11 +105,11 @@ export default function LandTrackerPage() {
         let fromCache = false;
 
         if (fieldsData && Array.isArray(fieldsData) && fieldsData.length > 0) {
-          console.log('✅ Loaded fields from cache:', fieldsData.length, 'items');
+          console.log('Loaded fields from cache:', fieldsData.length, 'items');
           fromCache = true;
         } else {
           // If no cached data, fetch from backend
-          console.log('📥 No cache found, fetching fields from backend...');
+          console.log('No cache found, fetching fields from backend...');
           let fieldsUrl = 'http://localhost:5001/api/fields';
           if (userId) fieldsUrl += `?user_id=${userId}`;
           
@@ -120,7 +120,7 @@ export default function LandTrackerPage() {
           }
           const fData = await fRes.json().catch(() => ({}));
           fieldsData = fData.fields || [];
-          console.log('📥 Loaded fields from backend:', fieldsData.length, 'items');
+          console.log('Loaded fields from backend:', fieldsData.length, 'items');
         }
 
         // Fetch crop names from dedicated endpoint
@@ -188,7 +188,7 @@ export default function LandTrackerPage() {
                 ff.status = 'occupied';
                 // Fill crop name if missing
                 if (!ff.crop && firstCrop.name) ff.crop = firstCrop.name;
-                console.log(`✓ Loaded planting date for field ${ff.id}: ${ff.planting_date}`);
+                console.log(`Loaded planting date for field ${ff.id}: ${ff.planting_date}`);
               }
             } else {
               console.warn(`Failed to fetch crops for field ${ff.id}: ${cropRes.status}`);
